@@ -12,7 +12,7 @@ uv.lock
 
 # Project-specific ignores
 data/
-results
+results*
 results/
 analysis_results/
 analysis_outputs/
@@ -27,7 +27,7 @@ wandb/
 
 workspace/
 experiments/
-generated/
+generated*/
 docs/dep/
 scripts/
 figures/

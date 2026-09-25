@@ -15,6 +15,7 @@ def prepare_task(
         prompt_name: str = "default",
         n_responses: int = 1,
         max_examples: Optional[int] = None,
+        start_index: int = 0,
         data_path: Optional[str] = None,
         task_dir: Optional[str] = None,
     ):
@@ -41,7 +42,7 @@ def prepare_task(
     with open(data_path, "r") as f:
         data = json.load(f)
     print(f"Loaded {len(data)} examples from {data_path}, keeping max_examples={max_examples}")
-    data = data[:max_examples]
+    data = data[start_index : start_index + max_examples] if max_examples is not None else data[start_index:]
 
     if task_dir is None:
         task_dir = f"tasks/{task_id}"

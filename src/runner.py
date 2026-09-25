@@ -16,7 +16,7 @@ import os
 import numpy as np
 import copy
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import platform
 from dotenv import load_dotenv, dotenv_values
@@ -697,7 +697,14 @@ def run_single_instance_agentic(
             # In Docker mode, base_dir is the container-internal path (/workspace/project).
             # In non-Docker mode, base_dir is workspace_dir.absolute() (the host path).
             fname = os.path.basename(agent.system_prompt_filename)
-            agent = agent.model_copy(update={"system_prompt_filename": os.path.join(base_dir, fname)})
+            remapped_prompt_path = (
+                str(PurePosixPath(str(base_dir)) / fname)
+                if use_docker
+                else os.path.join(base_dir, fname)
+            )
+            agent = agent.model_copy(
+                update={"system_prompt_filename": remapped_prompt_path}
+            )
             # If the candidate used the canonical task MCP config with the host
             # workspace path, rebuild that config for the runtime workspace path.
             if task_id and base_dir != local_workspace:

@@ -20,9 +20,10 @@ Directory layout inside workspace_dir after setup:
 """
 
 import os
+import re
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _env_loca = os.environ.get("LOCA_BENCH_PATH")
 LOCA_BENCH_PATH = Path(_env_loca) if _env_loca else Path(__file__).parent.parent.parent / "LOCA-bench"
@@ -41,6 +42,80 @@ TASK_INSTRUCTION = (
     "stock_alert_email_template.md. The email account credentials are in "
     "admin_credentials.txt in the workspace."
 )
+
+# Keep the MCP servers unchanged, but expose a deterministic half-tool view to
+# the model for the Stock Alert ablation.  The protected core includes the
+# complete read/record/notify path; the remaining names are a stratified sample
+# of CRUD, reporting, and mailbox distractors.
+STOCK_ALERT_HALF_TOOL_NAMES = (
+    # Explicit built-in tools (FinishTool and ThinkTool are added separately by
+    # the SDK and are therefore not part of this regex).
+    "terminal",
+    "file_editor",
+    # Protected WooCommerce core.
+    "woocommerce_woo_products_list",
+    "woocommerce_woo_products_get",
+    # Protected Google Sheets core.
+    "google_sheet_get_sheet_data",
+    "google_sheet_update_cells",
+    "google_sheet_batch_update_cells",
+    "google_sheet_list_sheets",
+    "google_sheet_list_spreadsheets",
+    # Protected Email core.
+    "email_login",
+    "email_get_current_user",
+    "email_send_email",
+    # WooCommerce distractors (23).
+    "woocommerce_woo_products_create",
+    "woocommerce_woo_products_update",
+    "woocommerce_woo_products_delete",
+    "woocommerce_woo_products_batch_update",
+    "woocommerce_woo_products_variations_list",
+    "woocommerce_woo_products_categories_list",
+    "woocommerce_woo_products_categories_create",
+    "woocommerce_woo_products_tags_list",
+    "woocommerce_woo_products_reviews_list",
+    "woocommerce_woo_orders_list",
+    "woocommerce_woo_orders_get",
+    "woocommerce_woo_orders_create",
+    "woocommerce_woo_orders_update",
+    "woocommerce_woo_orders_delete",
+    "woocommerce_woo_orders_batch_update",
+    "woocommerce_woo_orders_notes_create",
+    "woocommerce_woo_orders_refunds_create",
+    "woocommerce_woo_customers_list",
+    "woocommerce_woo_customers_get",
+    "woocommerce_woo_customers_create",
+    "woocommerce_woo_customers_update",
+    "woocommerce_woo_reports_stock",
+    "woocommerce_woo_reports_low_stock",
+    # Google Sheets distractors (7).
+    "google_sheet_get_sheet_formulas",
+    "google_sheet_add_rows",
+    "google_sheet_add_columns",
+    "google_sheet_copy_sheet",
+    "google_sheet_rename_sheet",
+    "google_sheet_get_multiple_sheet_data",
+    "google_sheet_get_multiple_spreadsheet_summary",
+    # Email distractors (10).
+    "email_logout",
+    "email_list_users",
+    "email_create_user",
+    "email_check_connection",
+    "email_get_folders",
+    "email_get_emails",
+    "email_read_email",
+    "email_search_emails",
+    "email_reply_email",
+    "email_save_draft",
+)
+
+
+def get_tool_filter_regex() -> str:
+    """Return the deterministic half-tool allowlist for Stock Alert."""
+    return r"^(?:" + "|".join(
+        re.escape(name) for name in STOCK_ALERT_HALF_TOOL_NAMES
+    ) + r")$"
 
 
 def _ensure_loca_path() -> None:
@@ -140,9 +215,13 @@ def _build_server_config(server_script: Path, env: dict[str, str], docker_worksp
 
 
 def get_mcp_config(workspace_dir: str) -> dict:
-    workspace = Path(workspace_dir).resolve()
-    docker_workspace = str(workspace).startswith("/workspace/")
-    loca_root = Path("/loca-bench") if docker_workspace else LOCA_BENCH_PATH
+    docker_workspace = workspace_dir.startswith("/workspace/")
+    if docker_workspace:
+        workspace = PurePosixPath(workspace_dir)
+        loca_root = PurePosixPath("/loca-bench")
+    else:
+        workspace = Path(workspace_dir).resolve()
+        loca_root = LOCA_BENCH_PATH
     mcp_root = loca_root / "mcp_convert" / "mcps"
 
     return {

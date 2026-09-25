@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1038,6 +1039,10 @@ def run_logged_command(
     command_display = " ".join(command)
     log_launcher_event(launcher_log_path, launcher_log_lock, f"START {prefix} command={command_display}")
 
+    process_env = os.environ.copy()
+    process_env["PYTHONUTF8"] = "1"
+    process_env["PYTHONIOENCODING"] = "utf-8"
+
     with open(log_path, "w", encoding="utf-8") as run_log:
         run_log.write(f"$ {command_display}\n")
         run_log.flush()
@@ -1048,7 +1053,10 @@ def run_logged_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
+            env=process_env,
         )
 
         assert process.stdout is not None
@@ -1056,7 +1064,9 @@ def run_logged_command(
             run_log.write(line)
             run_log.flush()
             with console_lock:
-                sys.stdout.write(f"[{prefix}] {line}")
+                console_encoding = sys.stdout.encoding or "utf-8"
+                console_line = line.encode(console_encoding, errors="replace").decode(console_encoding)
+                sys.stdout.write(f"[{prefix}] {console_line}")
                 sys.stdout.flush()
 
         return_code = process.wait()
@@ -1070,22 +1080,39 @@ def run_logged_command(
     return return_code
 
 
-def build_train_val_data(used_config: dict[str, Any], output_path: Path) -> tuple[Path, int, int]:
-    data_path = Path(used_config["data_path"])
+def build_test_data(used_config: dict[str, Any], output_path: Path) -> tuple[Path, int]:
+    data_path = Path(used_config["test_data_path"])
     with open(data_path, encoding="utf-8") as handle:
         data = json.load(handle)
 
-    max_examples = used_config["max_examples"]
-    data = data[:max_examples]
-    split_idx = max(1, int(len(data) * used_config["train_ratio"]))
-    trainset = data[:split_idx]
-    valset = data[split_idx:] if split_idx < len(data) else data
-    rerun_evalset = trainset + valset
+    start_index = used_config["test_start_index"]
+    max_examples = used_config["test_max_examples"]
+    testset = data[start_index : start_index + max_examples]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(rerun_evalset, handle, indent=2)
+        json.dump(testset, handle, indent=2)
 
+    return output_path, len(testset)
+
+
+def build_post_gepa_eval_data(
+    used_config: dict[str, Any], output_path: Path
+) -> tuple[Path, int, int]:
+    if "test_data_path" in used_config:
+        test_path, test_examples = build_test_data(used_config, output_path)
+        return test_path, 0, test_examples
+
+    data_path = Path(used_config["data_path"])
+    with open(data_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    data = data[: used_config["max_examples"]]
+    split_idx = max(1, int(len(data) * used_config["train_ratio"]))
+    trainset = data[:split_idx]
+    valset = data[split_idx:] if split_idx < len(data) else data
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(trainset + valset, handle, indent=2)
     return output_path, len(trainset), len(valset)
 
 
@@ -1111,7 +1138,7 @@ def create_post_gepa_run_config(run: PreparedRun) -> tuple[dict[str, Any], Path]
         raise FileNotFoundError(f"Missing best config: {best_config_path}")
 
     base_run_config = strict_load_yaml(base_run_config_path)
-    evalset_data_path, train_examples, val_examples = build_train_val_data(
+    evalset_data_path, train_examples, val_examples = build_post_gepa_eval_data(
         used_config,
         run_dir / "shared" / "config" / "post_gepa_evalset.json",
     )
@@ -1122,7 +1149,7 @@ def create_post_gepa_run_config(run: PreparedRun) -> tuple[dict[str, Any], Path]
     post_run_config["model_name"] = used_config["model_name"]
     post_run_config["prompt_name"] = used_config["prompt_name"]
     post_run_config["max_examples"] = train_examples + val_examples
-    post_run_config["n_responses"] = 3
+    post_run_config["n_responses"] = used_config.get("test_n_responses", 3)
     post_run_config["agent_batch_size"] = used_config["agent_batch_size"]
     post_run_config["eval_batch_size"] = used_config["eval_batch_size"]
     post_run_config["resume"] = False
@@ -1138,8 +1165,12 @@ def create_post_gepa_run_config(run: PreparedRun) -> tuple[dict[str, Any], Path]
 
     post_run_config["source_gepa_run_dir"] = str(run_dir)
     post_run_config["source_gepa_config"] = str(used_config_path)
+    # Legacy summary fields use the validation bucket for the held-out test;
+    # the explicit source_test_examples field records the actual semantics.
     post_run_config["source_train_examples"] = train_examples
     post_run_config["source_val_examples"] = val_examples
+    if "test_data_path" in used_config:
+        post_run_config["source_test_examples"] = val_examples
 
     post_run_config_path = Path(run.post_run_config_path)
     post_run_config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1191,6 +1222,13 @@ def probe_existing_optimize(run: PreparedRun) -> dict[str, Any]:
 
 
 def summarize_eval_scores(scores: list[float], n_rollouts: int) -> dict[str, Any]:
+    if not scores:
+        return {
+            "avg_score": 0.0,
+            "scores": [],
+            "num_results": 0,
+            "scores_by_rollout": [0.0] * n_rollouts,
+        }
     if len(scores) % n_rollouts != 0:
         raise ValueError(
             f"Expected score count to be divisible by n_rollouts={n_rollouts}, got {len(scores)}"
@@ -1211,6 +1249,15 @@ def summarize_eval_scores(scores: list[float], n_rollouts: int) -> dict[str, Any
 
 
 def summarize_run_costs(costs: list[float], n_rollouts: int) -> dict[str, Any]:
+    if not costs:
+        return {
+            "total_cost": 0.0,
+            "avg_cost": 0.0,
+            "costs": [],
+            "num_results": 0,
+            "total_costs_by_rollout": [0.0] * n_rollouts,
+            "avg_costs_by_rollout": [0.0] * n_rollouts,
+        }
     if len(costs) % n_rollouts != 0:
         raise ValueError(
             f"Expected cost count to be divisible by n_rollouts={n_rollouts}, got {len(costs)}"
@@ -1345,6 +1392,7 @@ def build_post_gepa_summary(run: PreparedRun) -> dict[str, Any]:
         "best_val_score_trace": optimization_summary.get("best_val_score_trace"),
         "train_examples": optimization_summary["train_examples"],
         "val_examples": optimization_summary["val_examples"],
+        "test_examples": int(post_run_config.get("source_test_examples", 0)),
         "best_config_path": optimization_summary["best_candidate_path"],
         "post_run_config_path": str(Path(run.post_run_config_path)),
         "rerun_rollout_version": rerun_rollout_version,
@@ -1358,6 +1406,12 @@ def build_post_gepa_summary(run: PreparedRun) -> dict[str, Any]:
         "rerun_train_scores_by_rollout": eval_summary["train"]["scores_by_rollout"],
         "rerun_val_score": eval_summary["val"]["avg_score"],
         "rerun_val_scores_by_rollout": eval_summary["val"]["scores_by_rollout"],
+        "rerun_test_score": eval_summary["val"]["avg_score"]
+        if post_run_config.get("source_test_examples") is not None
+        else None,
+        "rerun_test_scores_by_rollout": eval_summary["val"]["scores_by_rollout"]
+        if post_run_config.get("source_test_examples") is not None
+        else None,
     }
 
 
@@ -1373,6 +1427,7 @@ def build_post_gepa_json_row(summary: dict[str, Any]) -> dict[str, Any]:
         "reflection_lm": summary["reflection_lm"],
         "train_examples": summary["train_examples"],
         "val_examples": summary["val_examples"],
+        "test_examples": summary["test_examples"],
         "gepa": {
             "best_iteration": summary["gepa_best_iteration"],
             "best_val_score": summary["gepa_best_val_score"],
@@ -1406,6 +1461,10 @@ def build_post_gepa_json_row(summary: dict[str, Any]) -> dict[str, Any]:
                 "avg_costs_by_rollout": rerun_cost_summary["val"]["avg_costs_by_rollout"],
                 "score": summary["rerun_val_score"],
                 "scores_by_rollout": summary["rerun_val_scores_by_rollout"],
+            },
+            "test": {
+                "score": summary["rerun_test_score"],
+                "scores_by_rollout": summary["rerun_test_scores_by_rollout"],
             },
         },
     }

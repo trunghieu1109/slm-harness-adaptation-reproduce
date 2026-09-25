@@ -52,6 +52,7 @@ def run_optimization(
     model_name: str,
     prompt_name: str = "default",
     max_examples: Optional[int] = None,
+    data_start_index: int = 0,
     train_ratio: float = 0.7,
     eval_lm_name: Optional[str] = None,
     reflection_lm: str = "gemini-3.1-pro-preview",
@@ -61,6 +62,10 @@ def run_optimization(
     seed: int = 0,
     run_dir: Optional[str] = None,
     data_path: Optional[str] = None,
+    test_data_path: str = "data/woocommerce_stock_alert_s2l.json",
+    test_start_index: int = 0,
+    test_max_examples: int = 30,
+    test_n_responses: int = 3,
     agent_batch_size: Optional[int] = None,
     eval_batch_size: Optional[int] = None,
     use_adaptation_guide: bool = True,
@@ -85,6 +90,7 @@ def run_optimization(
         rollout_version="gepa",
         prompt_name=prompt_name,
         max_examples=max_examples,
+        start_index=data_start_index,
         data_path=data_path,
         task_dir=task_dir,
     )
@@ -110,6 +116,11 @@ def run_optimization(
         "model_name": model_name,
         "prompt_name": prompt_name,
         "max_examples": max_examples,
+        "data_start_index": data_start_index,
+        "test_data_path": test_data_path,
+        "test_start_index": test_start_index,
+        "test_max_examples": test_max_examples,
+        "test_n_responses": test_n_responses,
         "train_ratio": train_ratio,
         "eval_lm": eval_lm_name,
         "reflection_lm": reflection_lm,
@@ -256,6 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model_name", type=str, help="Model name for agent execution")
     parser.add_argument("--prompt_name", type=str, default=None, help="Prompt name for seed")
     parser.add_argument("--max_examples", type=int, default=None)
+    parser.add_argument("--data_start_index", type=int, default=None)
     parser.add_argument("--train_ratio", type=float, default=None)
     parser.add_argument("--reflection_lm", type=str, default=None, help="LM for proposer agent")
     parser.add_argument("--eval_lm", type=str, default=None, help="LM for evaluation")
@@ -328,6 +340,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     model_name = args.model_name or config.get("model_name")
     prompt_name = args.prompt_name or config.get("prompt_name", "default")
     max_examples = args.max_examples if args.max_examples is not None else config.get("max_examples")
+    data_start_index = (
+        args.data_start_index
+        if args.data_start_index is not None
+        else config.get("data_start_index", 0)
+    )
     train_ratio = args.train_ratio if args.train_ratio is not None else config.get("train_ratio", 0.7)
     reflection_lm = args.reflection_lm or config.get("reflection_lm", "gemini-3-flash-preview")
     eval_lm_name = args.eval_lm or config.get("eval_lm")
@@ -343,6 +360,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     seed = args.seed if args.seed is not None else config.get("seed", 0)
     run_dir = args.run_dir or config.get("run_dir")
     data_path = config.get("data_path")
+    test_data_path = config["test_data_path"]
+    test_start_index = config["test_start_index"]
+    test_max_examples = config["test_max_examples"]
+    test_n_responses = config["test_n_responses"]
     agent_batch_size = (
         args.agent_batch_size if args.agent_batch_size is not None else config.get("agent_batch_size")
     )
@@ -381,6 +402,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         model_name=model_name,
         prompt_name=prompt_name,
         max_examples=max_examples,
+        data_start_index=data_start_index,
         train_ratio=train_ratio,
         eval_lm_name=eval_lm_name,
         reflection_lm=reflection_lm,
@@ -390,6 +412,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         seed=seed,
         run_dir=run_dir,
         data_path=data_path,
+        test_data_path=test_data_path,
+        test_start_index=test_start_index,
+        test_max_examples=test_max_examples,
+        test_n_responses=test_n_responses,
         agent_batch_size=agent_batch_size,
         eval_batch_size=eval_batch_size,
         docker_network=docker_network,
