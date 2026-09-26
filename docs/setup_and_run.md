@@ -2,20 +2,36 @@
 
 Tài liệu này hướng dẫn thiết lập repository từ một checkout mới, cấu hình model,
 build môi trường Docker, chạy đúng một sample, và chạy toàn bộ một benchmark.
-Các phần đầu dùng PowerShell trên Windows; phần 13 cung cấp command dành riêng
-cho Ubuntu và Git Bash.
+Phần 1–11 dùng Bash trên Ubuntu; phần 12 là bản chạy trên Windows Git Bash.
+Phần 13 dùng chung cho hai hệ điều hành sau khi thiết lập đúng shell.
 
 ## 1. Yêu cầu hệ thống
 
 - Git.
 - `uv`.
-- Docker Desktop ở chế độ Linux containers.
+- Ubuntu: Docker Engine và Docker Compose v2; Windows: Docker Desktop ở chế độ Linux containers.
 - Quyền truy cập model/API sẽ sử dụng.
 - Quyền truy cập hai Git submodule của repository.
 
+Cài `uv` trên Ubuntu nếu chưa có:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+uv --version
+```
+
+Chạy installer bằng user sẽ chạy benchmark, không thêm `sudo` trước installer.
+Lệnh `source` cập nhật PATH ngay trong shell hiện tại. Không cần cài Python
+trước để cài `uv`; bước `uv sync` bên dưới sẽ chuẩn bị Python cho project.
+Windows Git Bash dùng lệnh cài riêng ở phần 12.
+Nguồn: [hướng dẫn cài đặt chính thức của uv](https://docs.astral.sh/uv/getting-started/installation/).
+
 Kiểm tra nhanh:
 
-```powershell
+```bash
 git --version
 uv --version
 docker info
@@ -23,13 +39,13 @@ docker info
 
 `docker info` phải hiển thị cả thông tin client và server. Nếu lệnh này báo
 `permission denied` hoặc không kết nối được daemon, cần khởi động/sửa quyền
-Docker Desktop trước khi tiếp tục.
+Docker daemon (Ubuntu) hoặc Docker Desktop (Windows) trước khi tiếp tục.
 
 ## 2. Khởi tạo submodule
 
 Từ thư mục gốc của repository:
 
-```powershell
+```bash
 git submodule sync --recursive
 git submodule update --init --recursive
 git submodule status
@@ -41,9 +57,9 @@ Kết quả thành công không có dấu `-` trước commit của `LOCA-bench`
 `software-agent-sdk` mặc định dùng SSH. Nếu máy chưa cấu hình GitHub SSH key,
 override URL của submodule sang HTTPS rồi chạy lại:
 
-```powershell
+```bash
 git submodule sync --recursive
-git config submodule.software-agent-sdk.url `
+git config submodule.software-agent-sdk.url \
   https://github.com/malusamayo/software-agent-sdk.git
 git submodule update --init --recursive
 ```
@@ -54,34 +70,34 @@ truy cập repository đó.
 Nếu `LOCA-bench` đã có commit nhưng thư mục chỉ chứa `.git`, khôi phục index và
 working tree từ commit của submodule:
 
-```powershell
+```bash
 git -C LOCA-bench restore --source=HEAD --staged --worktree -- .
 ```
 
 Xác minh các phần cần cho Stock Alert:
 
-```powershell
-Test-Path .\LOCA-bench\gem\envs\woocommerce_stock_alert_s2l
-Test-Path .\LOCA-bench\mcp_convert
-Test-Path .\software-agent-sdk\openhands-sdk
+```bash
+test -d LOCA-bench/gem/envs/woocommerce_stock_alert_s2l && echo OK
+test -d LOCA-bench/mcp_convert && echo OK
+test -d software-agent-sdk/openhands-sdk && echo OK
 ```
 
-Cả ba lệnh phải trả về `True`.
+Cả ba lệnh phải in `OK`.
 
 ## 3. Cài dependency Python
 
 Project yêu cầu Python 3.14. `uv` có thể tự quản lý phiên bản Python phù hợp.
-Trên Windows nên đặt cache trong workspace nếu cache mặc định bị hạn chế quyền:
+Đặt cache trong workspace để dễ quản lý:
 
-```powershell
-$env:UV_CACHE_DIR = Join-Path $PWD ".uv-cache"
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
 uv sync
 ```
 
 Lệnh này cũng tạo `uv.lock`. Dockerfile của các task cần file lock này khi
 build image. Ở các lần setup sau, có thể dùng:
 
-```powershell
+```bash
 uv sync --frozen
 ```
 
@@ -92,8 +108,8 @@ Runner đọc model registry từ `configs/models.yaml` và biến môi trườn
 
 Tạo thư mục config nếu chưa có:
 
-```powershell
-New-Item -ItemType Directory -Force configs | Out-Null
+```bash
+mkdir -p configs
 ```
 
 Ví dụ cho một model được phục vụ qua API tương thích OpenAI:
@@ -120,16 +136,18 @@ Hai trường `reasoning_effort: none` và `enable_thinking: false` tắt reason
 của Qwen ở cả lớp SDK và Qwen chat template. `src.utils.build_sdk_llm` chuyển
 `extra_body` trong model registry thành request body của OpenAI-compatible API.
 
-Ví dụ `.env` khi model server chạy trên máy host:
+Ví dụ `.env` với model server mà cả host và container truy cập được:
 
 ```dotenv
-QWEN_API_BASE=http://host.docker.internal:8000/v1
+QWEN_API_BASE=http://<HOST_IP>:8000/v1
 QWEN_API_KEY=replace-with-the-real-key
 ```
 
-Dùng `host.docker.internal` thay cho `localhost` khi agent trong container cần
-gọi model server chạy trên Windows host. Với API public, dùng URL HTTPS của
-provider.
+Trên Ubuntu, thay `<HOST_IP>` bằng IP của host truy cập được từ container;
+model server phải lắng nghe trên interface đó (ví dụ `0.0.0.0`), không chỉ
+`127.0.0.1`. Runner hiện không tự thêm mapping `host.docker.internal` cho
+Docker Engine Linux. Trên Docker Desktop Windows có thể dùng
+`http://host.docker.internal:8000/v1`. Với API public, dùng URL HTTPS của provider.
 
 Mọi model được tham chiếu bởi các trường sau đều phải có alias tương ứng trong
 `configs/models.yaml`:
@@ -144,8 +162,8 @@ thêm Gemini.
 
 Kiểm tra registry có thể được load:
 
-```powershell
-$env:UV_CACHE_DIR = Join-Path $PWD ".uv-cache"
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
 uv run python -c "from src.utils import LM_DICT; print(sorted(LM_DICT))"
 ```
 
@@ -157,36 +175,39 @@ Nếu dùng Vertex AI, đặt service-account JSON tại `.vertex-ai.json` hoặ
 hình đường dẫn qua biến môi trường phù hợp với model registry.
 
 Luồng agentic Docker hiện mount `.vertex-ai.json`. Nếu hoàn toàn không dùng
-Vertex AI, có thể tạo một JSON placeholder hợp lệ:
+Vertex AI, có thể tạo một JSON placeholder hợp lệ nếu file chưa tồn tại (không ghi đè credential thật):
 
-```powershell
-'{}' | Set-Content -NoNewline .vertex-ai.json
+```bash
+test -e .vertex-ai.json || printf '%s\n' '{}' > .vertex-ai.json
 ```
 
 Không commit credential thật vào Git.
 
 ## 6. Build Docker image của task
 
-Compose yêu cầu biến `UID`. Trên Windows có thể dùng UID cố định cho container:
+Compose yêu cầu biến môi trường `UID`. Bash có biến `UID` chỉ đọc, nên dùng
+`env UID=...` cho từng lệnh Compose. Dùng UID của user Ubuntu hiện tại; nếu
+đang chạy shell root, chọn UID 1000 vì Dockerfile tạo user mới bằng `useradd`:
 
-```powershell
-$env:UID = "1000"
-docker compose config --services
+```bash
+container_uid="$(id -u)"
+if [ "$container_uid" -eq 0 ]; then container_uid=1000; fi
+env UID="$container_uid" docker compose config --services
 ```
 
 Build riêng image của Stock Alert:
 
-```powershell
-docker compose build woocommerce_stock_alert_s2l
+```bash
+env UID="$container_uid" docker compose build woocommerce_stock_alert_s2l
 docker image inspect woocommerce_stock_alert_s2l:latest
 ```
 
 Với task khác, tìm `server_image` trong `tasks/<task_id>/run.yaml`, rồi build
 service tương ứng nếu service đó có trong `docker compose config --services`:
 
-```powershell
-$taskId = "machine_operating_s2l"
-docker compose build $taskId
+```bash
+task_id="machine_operating_s2l"
+env UID="$container_uid" docker compose build "$task_id"
 ```
 
 Một số benchmark có môi trường ngoài repository, ví dụ WebArena hoặc
@@ -199,21 +220,22 @@ Dùng `run-baseline` thay vì gọi thẳng `src.collect` với task config. Run
 override `max_examples`, `n_responses`, `rollout_version`, đồng thời bỏ
 `agent_file` cũ nếu manifest không yêu cầu custom agent.
 
-```powershell
-$taskId = "woocommerce_stock_alert_s2l"
-$modelName = "qwen3.6-35b-a3b-fp8"
-$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$rolloutVersion = "stock_alert_one_$runStamp"
-$batchDir = "generated/baseline_batches/$rolloutVersion"
+```bash
+task_id="woocommerce_stock_alert_s2l"
+model_name="qwen3.6-35b-a3b-fp8"
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+rollout_version="stock_alert_one_$run_stamp"
+batch_dir="generated/baseline_batches/$rollout_version"
 
-$manifest = @"
+manifest=$(cat <<EOF
 task_id,model_name,max_examples,rollout_version,n_responses
-$taskId,$modelName,1,$rolloutVersion,1
-"@
+$task_id,$model_name,1,$rollout_version,1
+EOF
+)
 
-$manifest | uv run python run.py run-baseline `
-  --manifest - `
-  --batch-dir $batchDir `
+printf '%s\n' "$manifest" | uv run python run.py run-baseline \
+  --manifest - \
+  --batch-dir "$batch_dir" \
   --yes
 ```
 
@@ -250,35 +272,36 @@ Trước tiên mở `tasks/<task_id>/run.yaml` và xác nhận:
 
 Đếm số record trong dataset JSON, ví dụ:
 
-```powershell
-$dataPath = "data/woocommerce_stock_alert_s2l.json"
-$exampleCount = (Get-Content $dataPath -Raw | ConvertFrom-Json).Count
-$exampleCount
+```bash
+data_path="data/woocommerce_stock_alert_s2l.json"
+example_count=$(uv run python -c 'import json, sys; print(len(json.load(open(sys.argv[1], encoding="utf-8"))))' "$data_path")
+printf '%s\n' "$example_count"
 ```
 
 Sau đó chạy toàn bộ dataset:
 
-```powershell
-$taskId = "woocommerce_stock_alert_s2l"
-$modelName = "qwen3.6-35b-a3b-fp8"
-$maxExamples = $exampleCount
-$nResponses = 1
-$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$rolloutVersion = "full_$runStamp"
-$batchDir = "generated/baseline_batches/${taskId}_$rolloutVersion"
+```bash
+task_id="woocommerce_stock_alert_s2l"
+model_name="qwen3.6-35b-a3b-fp8"
+max_examples=$example_count
+n_responses=1
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+rollout_version="full_$run_stamp"
+batch_dir="generated/baseline_batches/${task_id}_$rollout_version"
 
-$manifest = @"
+manifest=$(cat <<EOF
 task_id,model_name,max_examples,rollout_version,n_responses
-$taskId,$modelName,$maxExamples,$rolloutVersion,$nResponses
-"@
+$task_id,$model_name,$max_examples,$rollout_version,$n_responses
+EOF
+)
 
-$manifest | uv run python run.py run-baseline `
-  --manifest - `
-  --batch-dir $batchDir `
+printf '%s\n' "$manifest" | uv run python run.py run-baseline \
+  --manifest - \
+  --batch-dir "$batch_dir" \
   --yes
 ```
 
-Để chạy benchmark khác, thay `$taskId`, `$modelName`, `$dataPath` và build đúng
+Để chạy benchmark khác, thay `$task_id`, `$model_name`, `$data_path` và build đúng
 Docker service. Với replication paper, số rollout thường là `3`; với smoke test
 nên giữ `1` để giảm thời gian và chi phí.
 
@@ -302,19 +325,20 @@ trong model registry.
 
 Ví dụ smoke test với một task:
 
-```powershell
-$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$batchDir = "generated/gepa_batches/stock_alert_$runStamp"
+```bash
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+batch_dir="generated/gepa_batches/stock_alert_$run_stamp"
 
-$manifest = @"
+manifest=$(cat <<EOF
 Task,task_lm,N,budget ($),use_adaptation,reflection_lm,num_exploration,seed
 woocommerce_stock_alert_s2l,qwen3.6-35b-a3b-fp8,10,2,TRUE,<reflection-model-alias>,1,0
-"@
+EOF
+)
 
-$manifest | uv run python run.py run `
-  --manifest - `
-  --batch-dir $batchDir `
-  --max-parallel 1 `
+printf '%s\n' "$manifest" | uv run python run.py run \
+  --manifest - \
+  --batch-dir "$batch_dir" \
+  --max-parallel 1 \
   --yes
 ```
 
@@ -325,15 +349,15 @@ budget và `N` theo thí nghiệm cần tái lập.
 
 Có thể tách bước tạo config và bước thực thi để kiểm tra YAML trước khi chạy:
 
-```powershell
-$manifest | uv run python run.py prepare-baseline `
-  --manifest - `
-  --batch-dir $batchDir
+```bash
+printf '%s\n' "$manifest" | uv run python run.py prepare-baseline \
+  --manifest - \
+  --batch-dir "$batch_dir"
 
-Get-Content "$batchDir\configs\*.yaml"
+cat "$batch_dir"/configs/*.yaml
 
-uv run python run.py launch-baseline `
-  --batch-dir $batchDir `
+uv run python run.py launch-baseline \
+  --batch-dir "$batch_dir" \
   --yes
 ```
 
@@ -348,11 +372,12 @@ Dùng HTTPS override như phần 2 hoặc cấu hình GitHub SSH key có quyền
 
 ### `USER_UID not set`
 
-```powershell
-$env:UID = "1000"
+```bash
+container_uid="$(id -u)"
+if [ "$container_uid" -eq 0 ]; then container_uid=1000; fi
 ```
 
-Biến này cần tồn tại trong PowerShell session đang chạy `docker compose`.
+Sau đó dùng `env UID="$container_uid" docker compose build <service>` trong cùng shell.
 
 ### `Unknown model_name` hoặc `Unknown eval_lm_name`
 
@@ -361,7 +386,8 @@ Thêm đúng alias vào `configs/models.yaml`. Với evaluator rule-based, bỏ
 
 ### Model server chạy local nhưng container không kết nối được
 
-Trong `.env`, dùng `host.docker.internal` thay cho `localhost`.
+Trong `.env`, dùng IP host truy cập được từ container trên Ubuntu, hoặc
+`host.docker.internal` trên Docker Desktop Windows; xem phần 4.
 
 ### Batch directory đã tồn tại
 
@@ -387,13 +413,14 @@ chuyển thành đường dẫn ổ đĩa, và LOCA không tương thích với 
 
 Sau khi cập nhật code, đồng bộ lock/dependency rồi build lại image bằng cache:
 
-```powershell
-$env:UV_CACHE_DIR = Join-Path $PWD ".uv-cache"
-$env:UID = "1000"
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
+container_uid="$(id -u)"
+if [ "$container_uid" -eq 0 ]; then container_uid=1000; fi
 
 uv lock
 uv sync
-docker compose build woocommerce_stock_alert_s2l
+env UID="$container_uid" docker compose build woocommerce_stock_alert_s2l
 ```
 
 Không cần `--no-cache`. Các sample sau dùng chung image
@@ -402,28 +429,74 @@ Dockerfile thay đổi.
 
 ### `uv` không truy cập được cache mặc định trên Windows
 
-```powershell
-$env:UV_CACHE_DIR = Join-Path $PWD ".uv-cache"
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
 ```
 
-Sau đó chạy lại `uv sync` hoặc `uv run ...` trong cùng PowerShell session.
+Sau đó chạy lại `uv sync` hoặc `uv run ...` trong cùng Bash session.
 
-## 12. Ghi chú cho Linux/macOS
+## 12. Bản chạy trên Windows Git Bash
 
-Các bước giống nhau, nhưng UID và manifest stdin có thể viết như sau:
+Mở **Git Bash**, chuyển tới thư mục checkout, và bật Docker Desktop ở chế độ
+Linux containers. Các lệnh Bash ở phần 2–11 dùng được sau khi thiết lập sau;
+không dùng cú pháp `$env:...`, `Get-Date` hoặc dấu backtick của PowerShell.
+
+Cài `uv` bản Windows nếu chưa có bằng lệnh sau ngay trong Git Bash
+(lệnh này gọi PowerShell để chạy installer chính thức):
 
 ```bash
-export UID="$(id -u)"
-export UV_CACHE_DIR="$PWD/.uv-cache"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'irm https://astral.sh/uv/install.ps1 | iex'
+export PATH="$(cygpath -u "$USERPROFILE")/.local/bin:$PATH"
+uv --version
+```
 
+Lệnh `export PATH` giúp dùng `uv` ngay trong Git Bash hiện tại với vị trí cài
+mặc định của Windows. Sau đó tiếp tục setup:
+
+```bash
+# Thay đường dẫn bằng checkout trên máy Windows.
+cd /c/Users/YOUR_USER/slm-harness-adaptation-reproduce
+export UV_CACHE_DIR="$(pwd -W)/.uv-cache"
+export MSYS_NO_PATHCONV=1
+export MSYS2_ENV_CONV_EXCL=UV_CACHE_DIR
+container_uid=1000
+
+git --version
+uv --version
+docker info
+git submodule sync --recursive
+git submodule update --init --recursive
+uv sync
+mkdir -p configs
+```
+
+`pwd -W` tạo đường dẫn Windows cho `uv` native. `MSYS_NO_PATHCONV=1` giữ nguyên
+đường dẫn container như `/workspace/...` khi Git Bash gọi Docker CLI.
+Nếu submodule SSH lỗi, dùng HTTPS override ở phần 2. Cấu hình
+`configs/models.yaml` và `.env` như phần 4; model server trên Windows host dùng
+`QWEN_API_BASE=http://host.docker.internal:8000/v1`.
+
+Build và chạy thử đúng một sample trong cùng Git Bash session:
+
+```bash
+test -e .vertex-ai.json || printf '%s\n' '{}' > .vertex-ai.json
+uv run python -c "from src.utils import LM_DICT; print(sorted(LM_DICT))"
+env UID=1000 docker compose build woocommerce_stock_alert_s2l
+
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+rollout_version="stock_alert_one_${run_stamp}"
 uv run python run.py run-baseline \
   --manifest - \
-  --batch-dir generated/baseline_batches/stock_alert_one \
-  --yes <<'EOF'
+  --batch-dir "generated/baseline_batches/$rollout_version" \
+  --yes <<EOF
 task_id,model_name,max_examples,rollout_version,n_responses
-woocommerce_stock_alert_s2l,qwen3.6-35b-a3b-fp8,1,stock_alert_one,1
+woocommerce_stock_alert_s2l,qwen3.6-35b-a3b-fp8,1,$rollout_version,1
 EOF
 ```
+
+Để chạy bốn benchmark ở phần 13, giữ `container_uid=1000` và cache Windows
+đã đặt ở đây; bỏ qua block khởi tạo shell Ubuntu ở phần 13.1. Lệnh heredoc,
+`date`, `printf` và các lệnh runner còn lại dùng chung trên cả hai shell.
 
 ## 13. Chạy Stock Alert, Anomaly Detection, Website Management và Code Refactoring
 
@@ -448,14 +521,19 @@ một response cho mỗi sample.
 
 ### 13.1. Chuẩn bị chung trên Ubuntu/Git Bash
 
-Chạy từ thư mục gốc của repository. Dùng `env UID=1000` ngay trước Docker
-Compose vì `UID` là biến read-only trong Bash và không nên gán lại bằng
-`export UID=...`.
+Chạy từ thư mục gốc của repository, sau khi hoàn thành phần 1–5.
+Trên Ubuntu, khởi tạo shell như sau (Git Bash dùng phần 12):
 
 ```bash
 export UV_CACHE_DIR="$PWD/.uv-cache"
+container_uid="$(id -u)"
+if [ "$container_uid" -eq 0 ]; then container_uid=1000; fi
+```
 
-uv sync --frozen
+Sau đó chạy chung trên cả hai shell:
+
+```bash
+uv sync
 
 uv run python - <<'PY'
 from src.utils import LM_DICT
@@ -466,25 +544,30 @@ assert not missing, f"Missing model aliases: {sorted(missing)}"
 print("Model aliases OK")
 PY
 
-env UID=1000 docker compose build \
+env UID="$container_uid" docker compose build \
   woocommerce_stock_alert_s2l \
   machine_operating_s2l \
   webarena \
   refactorbench
 ```
 
-RefactorBench cần các source repository đi kèm benchmark. Clone một lần và đặt
-biến môi trường trỏ tới thư mục `repositories`:
+#### Chuẩn bị source code cho RefactorBench
+
+`data/refactorbench.json` giữ các `repo_path` tuyệt đối từ máy tạo dataset, ví
+dụ `/mnt/data_4tb/datasets/RefactorBench/repositories/salt_refactor`. Các đường
+dẫn đó không tồn tại trên máy mới. Clone bản benchmark chính thức, chứa đúng
+snapshot của chín source repository, rồi dùng `REFACTORBENCH_REPOS_DIR` để
+override `repo_path`:
 
 ```bash
 mkdir -p external
 
 if [ ! -d external/RefactorBench/.git ]; then
-  git clone https://github.com/microsoft/RefactorBench.git \
+  git clone --depth 1 https://github.com/microsoft/RefactorBench.git \
     external/RefactorBench
 fi
 
-export REFACTORBENCH_REPOS_DIR="external/RefactorBench/repositories"
+export REFACTORBENCH_REPOS_DIR="$PWD/external/RefactorBench/repositories"
 
 uv run python - <<'PY'
 import json
@@ -501,16 +584,59 @@ PY
 ```
 
 Biến `REFACTORBENCH_REPOS_DIR` phải tồn tại trong chính shell session dùng để
-launch batch. Đường dẫn tương đối ở trên hoạt động trên cả Ubuntu và Git Bash;
-nó override các đường dẫn `/mnt/data_4tb/...` được lưu trong dataset gốc mà
-không cần sửa `data/refactorbench.json`.
+prepare hoặc launch batch. Khi mở terminal mới, chạy lại lệnh `export`; không
+cần sửa `data/refactorbench.json`. Nếu collect đã fail vì thiếu repository, sau
+khi export đúng biến có thể tiếp tục batch đã prepare:
+
+```bash
+uv run python run.py launch-baseline \
+  --batch-dir generated/baseline_batches/REPLACE_WITH_PREPARED_BATCH \
+  --yes
+```
+
+#### Chuẩn bị website cho WebArena
 
 WebArena đang có `start_servers: false`, vì vậy khởi động site
-`shopping_admin` trước khi chạy baseline hoặc GEPA và giữ server hoạt động:
+`shopping_admin` trước khi chạy baseline hoặc GEPA. Lần đầu lệnh này tải image;
+những lần sau nó dùng lại image/container local:
 
 ```bash
 uvx webarena-verified env start --site shopping_admin
 ```
+
+Lệnh start tạo container Docker chạy nền, nên không cần giữ terminal mở. Nếu
+CLI trên máy vẫn giữ foreground, có thể tách nó khỏi terminal và lưu log:
+
+```bash
+nohup uvx webarena-verified env start --site shopping_admin \
+  > /tmp/webarena-shopping-admin.log 2>&1 &
+disown
+```
+
+Xác minh container và trang admin bằng HTTP `GET` trước khi launch benchmark:
+
+```bash
+docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' \
+  | grep webarena_verified_shopping_admin
+
+curl -sS -o /dev/null \
+  -w 'status=%{http_code}\n' \
+  http://localhost:7780/admin
+```
+
+Kết quả cần có container ở trạng thái `Up` và `status=200`. Không dùng
+`curl -I` để health-check Magento vì request `HEAD` có thể trả `404` dù request
+`GET` hoạt động. Khi collect bắt đầu, harness kết nối site và agent container
+vào `webarena-net`, rồi thay `__SHOPPING_ADMIN__` bằng URL nội bộ dạng
+`http://<container-ip>/admin`. Có thể kiểm tra trong trace/log:
+
+```text
+Starting URL: http://<container-ip>/admin
+```
+
+Nếu trace vẫn chứa nguyên `Starting URL: __SHOPPING_ADMIN__`, dừng rollout,
+khởi động/kiểm tra site và chạy lại với `rollout_version` mới. Việc khởi động
+site giữa một rollout không sửa prompt đã được preprocess.
 
 ### 13.2. Chạy baseline trên 30 test sample đầu
 

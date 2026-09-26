@@ -6,7 +6,7 @@ prompt_name: "shopping_admin"
 max_examples: 30
 n_responses: 1
 agent_batch_size: 8
-resume: false
+resume: true
 
 is_agentic: true
 use_docker: true

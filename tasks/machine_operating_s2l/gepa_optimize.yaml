@@ -6,6 +6,8 @@ prompt_name: "default"
 # GEPA settings
 reflection_lm: "qwen3.6-35b-a3b-fp8"
 max_cost: 10.0
+max_metric_calls: 300
+no_improvement_patience: 10
 seed: 42
 num_exploration: 1
 
