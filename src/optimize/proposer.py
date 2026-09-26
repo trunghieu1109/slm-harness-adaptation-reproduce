@@ -329,8 +329,15 @@ class AgentProposer:
             conversation = Conversation(agent=proposer_agent, workspace=workspace_obj)
             conversation.send_message(instruction)
             candidates = self._run_proposer_loop(
-                conversation, iteration, workspace, candidate, iter_dir,
-                components_to_update, num_strategies,
+                conversation,
+                iteration,
+                workspace,
+                workspace_obj,
+                workspace_path_for_agent,
+                candidate,
+                iter_dir,
+                components_to_update,
+                num_strategies,
             )
             conversation.close()
 
@@ -341,6 +348,8 @@ class AgentProposer:
         conversation: Conversation,
         iteration: int,
         workspace: str,
+        workspace_obj: Any,
+        workspace_path_for_agent: str,
         candidate: dict[str, str],
         iter_dir: str,
         components_to_update: list[str],
@@ -392,7 +401,30 @@ class AgentProposer:
 
             valid_candidates = []
             for idx, new_code in files_to_validate:
-                success, error = validate_agent_candidate(new_code, agent_llm, self.task_id)
+                validation_name = f"attempt_{attempt + 1}"
+                if idx is not None:
+                    validation_name += f"_strategy_{idx}"
+                validation_workspace = os.path.abspath(
+                    os.path.join(workspace, "validation", validation_name)
+                )
+                validation_workspace_for_agent = str(
+                    PurePosixPath(workspace_path_for_agent)
+                    / "validation"
+                    / validation_name
+                )
+                validation_kwargs = {}
+                if self.use_docker:
+                    validation_kwargs = {
+                        "workspace": workspace_obj,
+                        "local_workspace": validation_workspace,
+                        "remote_workspace": validation_workspace_for_agent,
+                    }
+                success, error = validate_agent_candidate(
+                    new_code,
+                    agent_llm,
+                    self.task_id,
+                    **validation_kwargs,
+                )
                 if success:
                     new_cand = dict(candidate)
                     new_cand["agent_code"] = new_code

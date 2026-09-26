@@ -1,12 +1,16 @@
 import copy
 import difflib
 import hashlib
+import os
 import yaml
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional, Sequence
 
-from openhands.sdk import Agent, LLM
+from openhands.sdk import Agent, Conversation, LLM
+from openhands.sdk.workspace import RemoteWorkspace
+
+from ..task_setups import get_mcp_config, setup_proposer_workspace
 
 
 class LiteralBlockDumper(yaml.Dumper):
@@ -53,8 +57,6 @@ def _validate_worker(code: str, llm: LLM, task_id: Optional[str]) -> tuple[bool,
     from openhands.sdk import Agent as _Agent
     from openhands.sdk import Conversation as _Conversation
 
-    from ..task_setups import setup_proposer_workspace
-
     project_root = Path(__file__).resolve().parent.parent.parent
     validate_root = project_root / ".validate"
     validate_root.mkdir(exist_ok=True)
@@ -87,16 +89,179 @@ def _validate_worker(code: str, llm: LLM, task_id: Optional[str]) -> tuple[bool,
         return True, ""
 
 
+def _build_agent_config_worker(
+    code: str,
+    llm: LLM,
+    task_id: Optional[str],
+    local_workspace: str,
+) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """Build a candidate in an isolated subprocess and serialize its public config."""
+    if task_id:
+        setup_proposer_workspace(task_id, local_workspace)
+
+    try:
+        agent = execute_agent_candidate(code, local_workspace, llm)
+        if not isinstance(agent, Agent):
+            return (
+                False,
+                f"build_agent returned {type(agent).__name__}, expected Agent",
+                None,
+            )
+        return True, "", agent.model_dump(mode="python")
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}", None
+
+
+def _build_agent_in_subprocess(
+    code: str,
+    llm: LLM,
+    task_id: Optional[str],
+    local_workspace: str,
+) -> tuple[bool, str, Optional[Agent]]:
+    with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as pool:
+        future = pool.submit(
+            _build_agent_config_worker,
+            code,
+            llm,
+            task_id,
+            local_workspace,
+        )
+        success, error, agent_config = future.result()
+
+    if not success:
+        return False, error, None
+    assert agent_config is not None
+    return True, "", Agent.model_validate(agent_config)
+
+
+def _remap_agent_to_remote_workspace(
+    agent: Agent,
+    local_workspace: str,
+    remote_workspace: str,
+    task_id: Optional[str],
+) -> Agent:
+    """Remap host paths embedded in an Agent to an existing remote workspace."""
+    local_workspace = os.path.abspath(local_workspace)
+    prompt_name = os.path.basename(agent.system_prompt_filename)
+    updates: dict[str, Any] = {
+        "system_prompt_filename": str(PurePosixPath(remote_workspace) / prompt_name),
+    }
+
+    if task_id:
+        local_mcp = get_mcp_config(task_id, local_workspace)
+        if local_mcp and agent.mcp_config == local_mcp:
+            updates["mcp_config"] = get_mcp_config(task_id, remote_workspace)
+
+    remapped_tools = []
+    for tool in agent.tools:
+        if tool.params:
+            params = {
+                key: value.replace(local_workspace, remote_workspace, 1)
+                if isinstance(value, str) and value.startswith(local_workspace)
+                else value
+                for key, value in tool.params.items()
+            }
+            remapped_tools.append(tool.model_copy(update={"params": params}))
+        else:
+            remapped_tools.append(tool)
+    updates["tools"] = remapped_tools
+
+    return agent.model_copy(update=updates)
+
+
+def _validate_in_remote_workspace(
+    code: str,
+    llm: LLM,
+    task_id: Optional[str],
+    workspace: RemoteWorkspace,
+    local_workspace: str,
+    remote_workspace: str,
+) -> tuple[bool, str]:
+    """Validate a candidate using an already-running remote workspace server."""
+    local_workspace = os.path.abspath(local_workspace)
+    os.makedirs(local_workspace, exist_ok=True)
+    if task_id:
+        setup_proposer_workspace(task_id, local_workspace)
+
+    success, error, agent = _build_agent_in_subprocess(
+        code,
+        llm,
+        task_id,
+        local_workspace,
+    )
+    if not success:
+        return False, error
+    assert agent is not None
+
+    try:
+        agent = _remap_agent_to_remote_workspace(
+            agent,
+            local_workspace,
+            remote_workspace,
+            task_id,
+        )
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+    for root, dirs, files in os.walk(local_workspace):
+        os.chmod(root, 0o777)
+        for directory in dirs:
+            os.chmod(os.path.join(root, directory), 0o777)
+        for filename in files:
+            os.chmod(os.path.join(root, filename), 0o666)
+
+    validation_workspace = RemoteWorkspace(
+        host=workspace.host,
+        api_key=workspace.api_key,
+        working_dir=remote_workspace,
+        read_timeout=workspace.read_timeout,
+        max_connections=workspace.max_connections,
+    )
+    conversation = None
+    try:
+        conversation = Conversation(
+            agent=agent,
+            workspace=validation_workspace,
+            visualizer=None,
+        )
+        conversation.send_message("test")
+    except Exception as e:
+        return False, f"{type(e).__name__} during conversation init: {e}"
+    finally:
+        if conversation is not None:
+            conversation.close()
+
+    return True, ""
+
+
 def validate_agent_candidate(
     code: str,
     llm: LLM,
     task_id: Optional[str] = None,
+    workspace: Optional[RemoteWorkspace] = None,
+    local_workspace: Optional[str] = None,
+    remote_workspace: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Validate candidate code by compiling, executing, and building the Agent."""
     try:
         compile(code, "agent.py", "exec")
     except SyntaxError as e:
         return False, f"SyntaxError: {e}"
+
+    if workspace is not None:
+        if local_workspace is None or remote_workspace is None:
+            raise ValueError(
+                "local_workspace and remote_workspace are required when reusing "
+                "a remote workspace"
+            )
+        return _validate_in_remote_workspace(
+            code,
+            llm,
+            task_id,
+            workspace,
+            local_workspace,
+            remote_workspace,
+        )
 
     with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as pool:
         future = pool.submit(_validate_worker, code, llm, task_id)
