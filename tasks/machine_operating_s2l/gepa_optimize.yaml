@@ -1,20 +1,27 @@
 task_id: "machine_operating_s2l"
 data_path: "data/machine_operating_s2l.json"
-model_name: "qwen3-coder-30b-a3b"
+model_name: "qwen3.5-9b"
 prompt_name: "default"
 
 # GEPA settings
-reflection_lm: "gemini-3.1-pro-preview"
+reflection_lm: "qwen3.6-35b-a3b-fp8"
 max_cost: 10.0
-seed: 7
+seed: 42
+num_exploration: 1
 
 # Data
-max_examples: 6
-n_responses: 1
+max_examples: 30
+data_start_index: 30
 train_ratio: 0.5
 
+# Held-out test range. These samples are not visible during GEPA optimization.
+test_data_path: "data/machine_operating_s2l.json"
+test_start_index: 0
+test_max_examples: 30
+test_n_responses: 3
+
 # Evaluation
-eval_lm: "gemini-3-flash-preview"
+eval_lm: null
 agent_batch_size: 8
 eval_batch_size: 16
 

@@ -1,6 +1,7 @@
 """Workspace setup for the RefactorBench task."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -8,7 +9,11 @@ from pathlib import Path
 def setup_workspace(workspace_dir: str, log_dir: str, example: dict) -> None:
     workspace = Path(workspace_dir)
     log_path = Path(log_dir)
-    repo_root = Path(example["repo_path"])
+    repo_root = (
+        Path(os.environ["REFACTORBENCH_REPOS_DIR"]) / example["repo_name"]
+        if "REFACTORBENCH_REPOS_DIR" in os.environ
+        else Path(example["repo_path"])
+    )
 
     shutil.copytree(repo_root, workspace, dirs_exist_ok=True)
     log_path.mkdir(parents=True, exist_ok=True)

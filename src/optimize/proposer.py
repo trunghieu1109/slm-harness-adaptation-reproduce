@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 import traceback
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
 from openhands.sdk import Agent, Conversation, LLM, Tool
@@ -265,7 +265,15 @@ class AgentProposer:
 
         # workspace is the docker path (e.g., /workspace/proposer) in docker mode
         # The prompt file should be relative to the workspace
-        prompt_path = os.path.join(workspace, "system_prompt.md")
+        # ``workspace`` is a container-internal POSIX path when the proposer
+        # runs through Docker.  This code is evaluated on the Windows host,
+        # so ``os.path.join`` would produce ``/workspace/proposer\\...`` and
+        # the agent-server would not be able to find the prompt file.
+        prompt_path = (
+            str(PurePosixPath(workspace) / "system_prompt.md")
+            if self.use_docker
+            else os.path.join(workspace, "system_prompt.md")
+        )
 
         mcp_cfg = get_mcp_config(self.task_id, workspace) if self.task_id else {}
         agent_kwargs = dict(

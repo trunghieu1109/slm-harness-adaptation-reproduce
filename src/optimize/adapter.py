@@ -543,8 +543,11 @@ class AgentOptimizationAdapter(GEPAAdapter):
                 zip(self._last_batch, eval_batch.outputs, eval_batch.scores)
             ):
                 if component == "agent_code":
-                    result = self._last_results[i] if i < len(self._last_results) else {}
-                    trajectory_json_path = result.get("raw_trace_json_path") or result.get("trace_json_path")
+                    run_result = self._last_results[i] if i < len(self._last_results) else {}
+                    trajectory_json_path = (
+                        run_result.get("raw_trace_json_path")
+                        or run_result.get("trace_json_path")
+                    )
                     feedback = (
                         format_eval_feedback(output, score)
                         if isinstance(output, dict)

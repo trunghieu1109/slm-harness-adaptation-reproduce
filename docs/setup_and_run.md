@@ -2,7 +2,8 @@
 
 Tài liệu này hướng dẫn thiết lập repository từ một checkout mới, cấu hình model,
 build môi trường Docker, chạy đúng một sample, và chạy toàn bộ một benchmark.
-Các lệnh chính bên dưới dùng PowerShell trên Windows.
+Các phần đầu dùng PowerShell trên Windows; phần 13 cung cấp command dành riêng
+cho Ubuntu và Git Bash.
 
 ## 1. Yêu cầu hệ thống
 
@@ -422,4 +423,188 @@ uv run python run.py run-baseline \
 task_id,model_name,max_examples,rollout_version,n_responses
 woocommerce_stock_alert_s2l,qwen3.6-35b-a3b-fp8,1,stock_alert_one,1
 EOF
+```
+
+## 13. Chạy Stock Alert, Anomaly Detection, Website Management và Code Refactoring
+
+Bốn task dùng cùng agent model `qwen3.5-9b`, reflection model
+`qwen3.6-35b-a3b-fp8` và GEPA seed `42`. Các file cấu hình liên quan là
+`run.yaml` và `gepa_optimize.yaml` trong thư mục của từng task; repository không
+có file tên `gepa_optimized.yaml`.
+
+Phân hoạch dữ liệu mặc định không chồng lấn:
+
+| Benchmark | Task ID | Tổng sample | Test | GEPA train/validation |
+|---|---|---:|---:|---:|
+| Stock Alert | `woocommerce_stock_alert_s2l` | 100 | index 0–29 | index 30–59: 15/15 |
+| Anomaly Detection | `machine_operating_s2l` | 100 | index 0–29 | index 30–59: 15/15 |
+| Website Management | `webarena` | 50 | index 0–29 | index 30–49: 10/10 |
+| Code Refactoring | `refactorbench` | 100 | index 0–29 | index 30–59: 15/15 |
+
+`max_examples: 30` là giới hạn tối đa sau `data_start_index: 30`. Vì dataset
+WebArena chỉ có 50 sample, GEPA tự lấy 20 sample còn lại thay vì 30. Mỗi lần
+đánh giá held-out sau GEPA dùng `test_n_responses: 3`; baseline bên dưới dùng
+một response cho mỗi sample.
+
+### 13.1. Chuẩn bị chung trên Ubuntu/Git Bash
+
+Chạy từ thư mục gốc của repository. Dùng `env UID=1000` ngay trước Docker
+Compose vì `UID` là biến read-only trong Bash và không nên gán lại bằng
+`export UID=...`.
+
+```bash
+export UV_CACHE_DIR="$PWD/.uv-cache"
+
+uv sync --frozen
+
+uv run python - <<'PY'
+from src.utils import LM_DICT
+
+required = {"qwen3.5-9b", "qwen3.6-35b-a3b-fp8"}
+missing = required - LM_DICT.keys()
+assert not missing, f"Missing model aliases: {sorted(missing)}"
+print("Model aliases OK")
+PY
+
+env UID=1000 docker compose build \
+  woocommerce_stock_alert_s2l \
+  machine_operating_s2l \
+  webarena \
+  refactorbench
+```
+
+RefactorBench cần các source repository đi kèm benchmark. Clone một lần và đặt
+biến môi trường trỏ tới thư mục `repositories`:
+
+```bash
+mkdir -p external
+
+if [ ! -d external/RefactorBench/.git ]; then
+  git clone https://github.com/microsoft/RefactorBench.git \
+    external/RefactorBench
+fi
+
+export REFACTORBENCH_REPOS_DIR="external/RefactorBench/repositories"
+
+uv run python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+data = json.loads(Path("data/refactorbench.json").read_text(encoding="utf-8"))
+repo_root = Path(os.environ["REFACTORBENCH_REPOS_DIR"])
+repo_names = sorted({item["repo_name"] for item in data})
+missing = [name for name in repo_names if not (repo_root / name).is_dir()]
+assert not missing, f"Missing RefactorBench repositories: {missing}"
+print("RefactorBench repositories OK")
+PY
+```
+
+Biến `REFACTORBENCH_REPOS_DIR` phải tồn tại trong chính shell session dùng để
+launch batch. Đường dẫn tương đối ở trên hoạt động trên cả Ubuntu và Git Bash;
+nó override các đường dẫn `/mnt/data_4tb/...` được lưu trong dataset gốc mà
+không cần sửa `data/refactorbench.json`.
+
+WebArena đang có `start_servers: false`, vì vậy khởi động site
+`shopping_admin` trước khi chạy baseline hoặc GEPA và giữ server hoạt động:
+
+```bash
+uvx webarena-verified env start --site shopping_admin
+```
+
+### 13.2. Chạy baseline trên 30 test sample đầu
+
+Command sau tạo một batch tuần tự cho cả bốn benchmark. `run-baseline` bỏ mọi
+`agent_file` cũ trong template nếu manifest không truyền cột đó, nên đây là
+baseline bằng agent mặc định.
+
+```bash
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+rollout_version="four_benchmarks_test30_${run_stamp}"
+batch_dir="generated/baseline_batches/${rollout_version}"
+
+uv run python run.py run-baseline \
+  --manifest - \
+  --batch-dir "$batch_dir" \
+  --yes <<EOF
+task_id,model_name,max_examples,rollout_version,n_responses,prompt_name
+woocommerce_stock_alert_s2l,qwen3.5-9b,30,$rollout_version,1,default
+machine_operating_s2l,qwen3.5-9b,30,$rollout_version,1,default
+webarena,qwen3.5-9b,30,$rollout_version,1,shopping_admin
+refactorbench,qwen3.5-9b,30,$rollout_version,1,default
+EOF
+```
+
+Muốn chạy riêng một benchmark thì giữ header và đúng một data row trong
+heredoc. Baseline runner luôn chạy các row tuần tự.
+
+### 13.3. Chạy GEPA rồi đánh giá best harness trên held-out test
+
+Command này giữ budget mặc định của từng task, chạy seed 42 và giới hạn một
+pipeline tại một thời điểm để tránh bốn benchmark cùng tranh GPU/Docker. Giá trị
+`max_examples=30` trong manifest chỉ override kích thước GEPA; các trường
+`data_start_index`, `test_start_index` và `test_max_examples` vẫn lấy từ từng
+`gepa_optimize.yaml`.
+
+```bash
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+batch_dir="generated/gepa_batches/four_benchmarks_seed42_${run_stamp}"
+
+uv run python run.py run \
+  --manifest - \
+  --batch-dir "$batch_dir" \
+  --max-parallel 1 \
+  --yes <<'EOF'
+task_id,model_name,max_examples,max_cost,use_adaptation_guide,reflection_lm,prompt_name,seed,num_exploration
+woocommerce_stock_alert_s2l,qwen3.5-9b,30,16,true,qwen3.6-35b-a3b-fp8,default,42,1
+machine_operating_s2l,qwen3.5-9b,30,10,true,qwen3.6-35b-a3b-fp8,default,42,1
+webarena,qwen3.5-9b,30,8,true,qwen3.6-35b-a3b-fp8,shopping_admin,42,1
+refactorbench,qwen3.5-9b,30,20,true,qwen3.6-35b-a3b-fp8,default,42,1
+EOF
+```
+
+`run.py run` thực hiện đủ ba phase: optimize trên train/validation, collect best
+harness trên 30 held-out test sample đầu, rồi evaluate. Không cần gọi riêng
+`src.gepa_optimize`, `src.collect` hoặc `src.evaluate`.
+
+Một seed chỉ có một output canonical tại
+`results/<task>/<model>_<prompt>/gepa/seed42`. Nếu seed 42 đã được prepare hoặc
+chạy trước đó, không tạo batch mới với cùng task/model/prompt/seed. Tiếp tục batch
+đã prepare bằng:
+
+```bash
+gepa_batch_dir="generated/gepa_batches/REPLACE_WITH_PREPARED_BATCH"
+
+uv run python run.py launch \
+  --batch-dir "$gepa_batch_dir" \
+  --max-parallel 1 \
+  --yes
+```
+
+Nếu optimize đã hoàn tất nhưng phase test/evaluate bị gián đoạn, chạy lại trực
+tiếp hai phase còn thiếu bằng `post_gepa_run.yaml` của task tương ứng, ví dụ:
+
+```bash
+post_config="results/woocommerce_stock_alert_s2l/qwen3.5-9b_default/gepa/seed42/shared/config/post_gepa_run.yaml"
+
+uv run python -m src.collect --config "$post_config"
+uv run python -m src.evaluate --config "$post_config"
+
+uv run python run.py resume-post \
+  --batch-dir "$gepa_batch_dir"
+```
+
+Lệnh `resume-post` cuối cùng chỉ dựng lại summary/table từ artifact đã có; nó
+không tự chạy lại collect hoặc evaluate. Thay phần đầu của `post_config` bằng
+task/prompt tương ứng cho ba benchmark còn lại.
+
+Các vị trí cần kiểm tra:
+
+```text
+generated/gepa_batches/<batch>/batch.json
+generated/gepa_batches/<batch>/launcher.log
+generated/gepa_batches/<batch>/logs/
+results/<task>/<model>_<prompt>/gepa/seed42/shared/config/used_config.yaml
+results/<task>/<model>_<prompt>/gepa/seed42/shared/config/optimization_summary.json
+results/<task>/<model>_<prompt>/rollouts/gepa_seed42_best_best_config/eval_results.yaml
 ```

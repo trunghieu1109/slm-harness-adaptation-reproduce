@@ -10,6 +10,9 @@ Tài liệu này mô tả bốn task đang được quan tâm:
 Mục tiêu là phân biệt rõ input của sample, môi trường được setup, tool agent
 được cấp, artifact đầu ra và cách evaluator tính điểm.
 
+Các cấu hình và command PowerShell để chạy chung cả bốn benchmark nằm tại
+[Setup and run benchmarks](setup_and_run.md#13-chạy-stock-alert-anomaly-detection-website-management-và-code-refactoring).
+
 ## Luồng chung
 
 ```text
@@ -91,8 +94,9 @@ dùng giá trị cột đó trong phép so sánh.
 - Setup/server: `src/task_setups/webarena_servers.py`
 - Evaluator: `src/task_evals/webarena.py`
 
-WebArena tổng quát có thể có nhiều site, nhưng config hiện tại chạy 50 sample
-trên `shopping_admin`.
+WebArena tổng quát có thể có nhiều site, nhưng dataset hiện tại có 50 sample
+trên `shopping_admin`: 30 sample đầu là held-out test, 20 sample còn lại được
+chia thành 10 train và 10 validation cho GEPA.
 
 ### Input
 

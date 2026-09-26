@@ -6,7 +6,7 @@ prompt_name: "default"
 # GEPA settings
 reflection_lm: "qwen3.6-35b-a3b-fp8"
 max_cost: 16.0
-seed: 8
+seed: 42
 num_exploration: 1
 
 # Evaluation

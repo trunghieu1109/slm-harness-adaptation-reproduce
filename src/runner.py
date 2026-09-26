@@ -5,6 +5,7 @@ import yaml
 import os
 import platform
 import traceback
+import time
 from functools import partial
 from copy import deepcopy
 from typing import List, Any, Optional
@@ -48,6 +49,51 @@ from .utils import build_sdk_llm
 
 _TRACE_DELEGATE_EXECUTOR_ATTR = "_trace_delegate_executor"
 _SUBAGENTS_DIR = "subagents"
+_DOCKER_START_MAX_ATTEMPTS = 3
+
+
+def _is_docker_port_error(exc: BaseException) -> bool:
+    """Return whether an exception indicates a host-port allocation conflict."""
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "port is not available",
+            "port is already allocated",
+            "bind for",
+            "address already in use",
+        )
+    )
+
+
+@contextmanager
+def _docker_workspace_context(**kwargs):
+    """Create a Docker workspace, retrying transient host-port conflicts.
+
+    DockerWorkspace starts its container in the constructor, so the retry must
+    surround construction itself. Once construction succeeds, exceptions from
+    the agent/conversation body are propagated and are never replayed.
+    """
+    for attempt in range(1, _DOCKER_START_MAX_ATTEMPTS + 1):
+        try:
+            workspace = DockerWorkspace(**kwargs)
+        except Exception as exc:
+            if attempt >= _DOCKER_START_MAX_ATTEMPTS or not _is_docker_port_error(exc):
+                raise
+            print(
+                f"Docker workspace startup hit a port conflict; "
+                f"retrying (next attempt {attempt + 1}/{_DOCKER_START_MAX_ATTEMPTS})..."
+            )
+            # Give Docker/OS a brief chance to release a conflicting mapping
+            # before selecting a new port on the next constructor attempt.
+            time.sleep(0.2 * attempt)
+            continue
+
+        # Keep cleanup semantics identical to the original `with
+        # DockerWorkspace(...)` call. Only constructor failures are retried.
+        with workspace as active_workspace:
+            yield active_workspace
+        return
 
 
 @contextmanager
@@ -90,7 +136,9 @@ def get_workspace_context(
                 skill_dir = os.path.dirname(os.path.abspath(skill.source))
                 docker_skill_dir = f"/workspace/skills/{os.path.basename(skill_dir)}"
                 docker_volumes.append(f"{skill_dir}:{docker_skill_dir}:ro")
-                skill.source = os.path.join(docker_skill_dir, "SKILL.md")
+                # This is a path inside the Linux container.  Do not use
+                # os.path.join here because the harness may run on Windows.
+                skill.source = str(PurePosixPath(docker_skill_dir) / "SKILL.md")
 
         if task_id == "tau2_airline":
             tau2_bench_path = os.environ.get(
@@ -98,7 +146,7 @@ def get_workspace_context(
             )
             docker_volumes.append(f"{os.path.abspath(tau2_bench_path)}:/tau2-bench:ro")
 
-        with DockerWorkspace(**make_docker_kwargs(
+        with _docker_workspace_context(**make_docker_kwargs(
             docker_workspace_path,
             server_image,
             docker_volumes,
@@ -202,7 +250,9 @@ def construct_docker_workspace(workspace_dir, system_prompt_path, skills, task_i
         skill_dir = os.path.dirname(os.path.abspath(skill.source))
         docker_skill_dir = f"/workspace/skills/{os.path.basename(skill_dir)}"
         docker_volumes.append(f"{skill_dir}:{docker_skill_dir}:ro")
-        skill.source = os.path.join(docker_skill_dir, "SKILL.md")
+        # This is a path inside the Linux container.  Do not use
+        # os.path.join here because the harness may run on Windows.
+        skill.source = str(PurePosixPath(docker_skill_dir) / "SKILL.md")
 
     if task_id == "tau2_airline":
         tau2_bench_path = os.environ.get(
@@ -782,7 +832,7 @@ def run_single_instance_agentic(
 
         agent = _build_agent(docker_workspace_path, docker_system_prompt_path)
 
-        with DockerWorkspace(**make_docker_kwargs(docker_workspace_path, server_image, docker_volumes, docker_network)) as docker_workspace:
+        with _docker_workspace_context(**make_docker_kwargs(docker_workspace_path, server_image, docker_volumes, docker_network)) as docker_workspace:
             for cmd in setup_commands:
                 docker_workspace.execute_command(cmd, timeout=90.0)
 
