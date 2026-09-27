@@ -5,7 +5,7 @@ prompt_name: "default"
 
 max_examples: 30
 n_responses: 1
-agent_batch_size: 8
+agent_batch_size: 12
 eval_batch_size: 16
 resume: true
 

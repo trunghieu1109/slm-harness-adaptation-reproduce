@@ -218,35 +218,35 @@ def print_summary(rollout_dir: Path) -> None:
         print("  None")
         return
 
-    for key in error_keys:
-        evaluation = failed_evaluations.get(key)
-        runtime_error = runtime_errors.get(key)
-        print()
-        print(f"  {rollout_label(key)}")
-        if evaluation is not None:
-            print(f"    Score            : {float(evaluation['score']):g}")
-            print(f"    Evaluation error : {str(evaluation['feedback']).strip()}")
-        elif key in missing_evaluations:
-            print("    Evaluation error : Missing from eval_results.yaml")
-        if runtime_error is not None:
-            print(f"    Runtime error    : {runtime_error}")
+    # for key in error_keys:
+    #     evaluation = failed_evaluations.get(key)
+    #     runtime_error = runtime_errors.get(key)
+    #     print()
+    #     print(f"  {rollout_label(key)}")
+    #     if evaluation is not None:
+    #         print(f"    Score            : {float(evaluation['score']):g}")
+    #         print(f"    Evaluation error : {str(evaluation['feedback']).strip()}")
+    #     elif key in missing_evaluations:
+    #         print("    Evaluation error : Missing from eval_results.yaml")
+    #     if runtime_error is not None:
+    #         print(f"    Runtime error    : {runtime_error}")
 
-        usage = context_usage[key]
-        print(f"    Context status   : {usage['status']}")
-        if "last_tokens" in usage:
-            print(
-                "    Last LLM call     : "
-                f"{usage['last_tokens']:,}/{usage['context_window']:,} tokens "
-                f"({usage['last_ratio']:.2%})"
-            )
-            print(
-                "    Peak LLM call     : "
-                f"{usage['peak_tokens']:,}/{usage['context_window']:,} tokens "
-                f"({usage['peak_ratio']:.2%})"
-            )
-            print(f"    LLM calls         : {usage['llm_calls']}")
-        if "trace_path" in usage:
-            print(f"    Trace             : {usage['trace_path']}")
+    #     usage = context_usage[key]
+    #     print(f"    Context status   : {usage['status']}")
+    #     if "last_tokens" in usage:
+    #         print(
+    #             "    Last LLM call     : "
+    #             f"{usage['last_tokens']:,}/{usage['context_window']:,} tokens "
+    #             f"({usage['last_ratio']:.2%})"
+    #         )
+    #         print(
+    #             "    Peak LLM call     : "
+    #             f"{usage['peak_tokens']:,}/{usage['context_window']:,} tokens "
+    #             f"({usage['peak_ratio']:.2%})"
+    #         )
+    #         print(f"    LLM calls         : {usage['llm_calls']}")
+    #     if "trace_path" in usage:
+    #         print(f"    Trace             : {usage['trace_path']}")
 
 
 def main() -> None:
