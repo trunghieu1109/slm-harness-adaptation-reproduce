@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: tasks/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   # webgen:
   #   image: webgen:latest
   #   build:
@@ -24,77 +24,76 @@ services:
     image: refactorbench:latest
     build:
       context: .
-      dockerfile: tasks/Dockerfile
+      dockerfile: tasks/refactorbench/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   refactorbench_codex:
     image: refactorbench_codex:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile.codex
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        BASE_IMAGE: refactorbench:latest
         CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   webarena:
     image: webarena:latest
     build:
       context: .
-      dockerfile: tasks/Dockerfile
+      dockerfile: tasks/webarena/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   webarena_codex:
     image: webarena_codex:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile.codex-webarena
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        BASE_IMAGE: webarena:latest
         CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
         PLAYWRIGHT_MCP_VERSION: ${PLAYWRIGHT_MCP_VERSION:-0.0.82}
-        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.64.0-alpha-1789764292000}
   docbench:
     image: docbench:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   browsecomplongcontext:
     image: browsecomplongcontext:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   machine_operating_s2l:
     image: machine_operating_s2l:latest
     build:
       context: .
-      dockerfile: tasks/Dockerfile.loca
+      dockerfile: tasks/machine_operating_s2l/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   machine_operating_s2l_codex:
     image: machine_operating_s2l_codex:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile.codex-loca
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        BASE_IMAGE: machine_operating_s2l:latest
         CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   woocommerce_stock_alert_s2l:
     image: woocommerce_stock_alert_s2l:latest
     build:
       context: .
-      dockerfile: tasks/Dockerfile.loca
+      dockerfile: tasks/woocommerce_stock_alert_s2l/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   woocommerce_stock_alert_s2l_codex:
     image: woocommerce_stock_alert_s2l_codex:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile.codex-loca
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        BASE_IMAGE: woocommerce_stock_alert_s2l:latest
         CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   # ab_testing_s2l:
   #   image: ab_testing_s2l:latest
@@ -109,14 +108,14 @@ services:
       context: .
       dockerfile: tasks/Dockerfile.loca
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   attendance_payroll_audit_s2l:
     image: attendance_payroll_audit_s2l:latest
     build:
       context: .
       dockerfile: tasks/Dockerfile
       args:
-        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        USER_UID: ${BENCHMARK_UID:-1000}
   # expense_reconciliation_s2l:
   #   image: expense_reconciliation_s2l:latest
   #   build:
@@ -130,4 +129,4 @@ services:
         context: .
         dockerfile: tasks/Dockerfile
         args:
-          USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+          USER_UID: ${BENCHMARK_UID:-1000}

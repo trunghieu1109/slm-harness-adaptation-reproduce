@@ -34,7 +34,8 @@ RUN uv venv /workspace/.venv \
  && uv sync --frozen --no-dev --active
 
 USER root
-RUN python -m playwright install --with-deps chromium
+RUN python -m playwright install --with-deps chromium \
+ && chown -R appuser:appuser /workspace/.cache/ms-playwright
 
 USER appuser
 

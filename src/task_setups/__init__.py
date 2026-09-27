@@ -51,6 +51,16 @@ ATTENDANCE_PAYROLL_AUDIT_TASK_IDS = frozenset(
 )
 
 
+def make_workspace_writable(workspace_dir: Path) -> None:
+    for root, _, filenames in os.walk(workspace_dir):
+        root_path = Path(root)
+        root_path.chmod(root_path.stat().st_mode | 0o222)
+        for filename in filenames:
+            path = root_path / filename
+            if not path.is_symlink():
+                path.chmod(path.stat().st_mode | 0o222)
+
+
 def preprocess_example(task_id: str, example: dict) -> dict:
     """Apply task-specific preprocessing to an example before running the agent."""
     if task_id == "webarena":
@@ -135,6 +145,8 @@ def setup_workspace(task_id: str, workspace_dir: str, log_dir: str, example: dic
         _tau2_airline.setup_workspace(workspace_dir, str(log_dir), example)
     if task_id == "woocommerce_stock_alert_s2l":
         _woocommerce_stock_alert_s2l.setup_workspace(workspace_dir, str(log_dir), example)
+
+    make_workspace_writable(Path(workspace_dir))
 
 
 def setup_servers(

@@ -192,11 +192,107 @@ def run_task(config: dict) -> None:
     print(f"Codex collection complete: {output_path}")
 
 
+def rerun_rollout(config: dict, example_index: int, rollout_id: int) -> None:
+    task_id = config["task_id"]
+    examples = json.loads(Path(config["data_path"]).read_text(encoding="utf-8"))
+    max_examples = config.get("max_examples")
+    if max_examples is not None and example_index >= max_examples:
+        raise ValueError(
+            f"example_index {example_index} is outside max_examples={max_examples}"
+        )
+    if rollout_id >= config["n_responses"]:
+        raise ValueError(
+            f"rollout_id {rollout_id} is outside n_responses={config['n_responses']}"
+        )
+
+    example = dict(examples[example_index])
+    example["example_id"] = example_index
+    example["rollout_id"] = rollout_id
+    task_dir = Path(config.get("task_dir", f"tasks/{task_id}"))
+    system_prompt = (
+        task_dir / "prompts" / f"{config['prompt_name']}.md"
+    ).read_text(encoding="utf-8")
+    rollout_dir = (
+        Path("results")
+        / task_id
+        / f"{config['model_name']}_{config['prompt_name']}"
+        / "rollouts"
+        / config["rollout_version"]
+    )
+    workspace = rollout_dir / f"example{example_index}_rollout{rollout_id}"
+    model_config = load_codex_model_config(config["model_name"])
+    servers_started = setup_servers(
+        task_id,
+        [{"example": example}],
+        start_servers=config.get("start_servers", False),
+        timeout=config.get("server_start_timeout", 300),
+        docker_network=config.get("docker_network"),
+    )
+    try:
+        result = run_codex_sample(
+            task_id=task_id,
+            example=preprocess_example(task_id, example),
+            system_prompt=system_prompt,
+            workspace_dir=workspace,
+            server_image=config["server_image"],
+            model_config=model_config,
+            max_time=config["max_time"],
+            docker_network=config.get("docker_network"),
+        )
+    finally:
+        teardown_servers(task_id, servers_started)
+
+    output_path = rollout_dir / "run.json"
+    existing_results = json.loads(output_path.read_text(encoding="utf-8"))
+    results_by_key = {
+        (item["example_id"], item["rollout_id"]): item
+        for item in existing_results
+    }
+    selected_examples = examples[:max_examples] if max_examples is not None else examples
+    for saved_example_index, raw_example in enumerate(selected_examples):
+        for saved_rollout_id in range(config["n_responses"]):
+            saved_workspace = (
+                rollout_dir
+                / f"example{saved_example_index}_rollout{saved_rollout_id}"
+            )
+            saved_log_dir = (
+                saved_workspace.parent / f"{saved_workspace.name}_logs"
+            )
+            metadata_path = saved_log_dir / "run_meta.json"
+            if not metadata_path.exists():
+                continue
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            trace_path = saved_log_dir / metadata["trace_file"]
+            saved_result = dict(raw_example)
+            saved_result["example_id"] = saved_example_index
+            saved_result["rollout_id"] = saved_rollout_id
+            saved_result["run_result"] = json.loads(
+                trace_path.read_text(encoding="utf-8")
+            )
+            results_by_key[(saved_example_index, saved_rollout_id)] = saved_result
+    results_by_key[(example_index, rollout_id)] = result
+    output_path.write_text(
+        json.dumps(
+            [results_by_key[key] for key in sorted(results_by_key)],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    execution = result["run_result"]["execution"]
+    print(
+        f"Saved example{example_index}_rollout{rollout_id} to {output_path}: "
+        f"return_code={execution['return_code']} timed_out={execution['timed_out']}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run task samples with the Codex CLI harness",
     )
     parser.add_argument("--config", required=True, help="Prepared baseline YAML config")
+    parser.add_argument("--example-index", type=int)
+    parser.add_argument("--rollout-id", type=int)
     args = parser.parse_args()
 
     load_dotenv(override=True)
@@ -204,7 +300,12 @@ def main() -> None:
         config = yaml.safe_load(handle)
     print("Effective Codex config:")
     print(yaml.safe_dump(config, sort_keys=False).rstrip())
-    run_task(config)
+    if (args.example_index is None) != (args.rollout_id is None):
+        parser.error("--example-index and --rollout-id must be provided together")
+    if args.example_index is not None:
+        rerun_rollout(config, args.example_index, args.rollout_id)
+    else:
+        run_task(config)
 
 
 if __name__ == "__main__":

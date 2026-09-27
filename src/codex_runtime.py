@@ -18,6 +18,7 @@ from .task_setups import get_mcp_config, setup_workspace
 
 CODEX_CONTAINER_WORKSPACE = "/workspace/project"
 CODEX_CONTAINER_HOME = "/workspace/.codex"
+WEBARENA_CHROMIUM_EXECUTABLE = "/usr/local/bin/webarena-chromium"
 CONSOLE_OUTPUT_LOCK = threading.Lock()
 WEBARENA_CODEX_INSTRUCTIONS = """
 ## Codex browser-tool mapping
@@ -142,6 +143,8 @@ def get_codex_mcp_config(task_id: str) -> dict[str, Any]:
                         "--headless",
                         "--isolated",
                         "--no-sandbox",
+                        "--executable-path",
+                        WEBARENA_CHROMIUM_EXECUTABLE,
                         "--output-dir",
                         f"{CODEX_CONTAINER_WORKSPACE}/.playwright-mcp",
                     ],
@@ -268,12 +271,33 @@ def _run_codex_exec(
     return return_code, timed_out
 
 
-def load_codex_events(events_path: Path) -> list[dict[str, Any]]:
+def load_codex_events(
+    events_path: Path,
+    allow_truncated_final_line: bool = False,
+) -> list[dict[str, Any]]:
     events = []
     with open(events_path, "r", encoding="utf-8") as handle:
-        for line in handle:
+        lines = handle.readlines()
+        for line_number, line in enumerate(lines, start=1):
             if line.strip():
-                events.append(json.loads(line))
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    is_truncated_final_line = (
+                        allow_truncated_final_line
+                        and line_number == len(lines)
+                        and not line.endswith("\n")
+                    )
+                    if not is_truncated_final_line:
+                        raise
+                    events.append(
+                        {
+                            "type": "error",
+                            "error_type": "codex_events_json_decode_error",
+                            "line_number": line_number,
+                            "message": str(exc),
+                        }
+                    )
     return events
 
 
@@ -318,6 +342,10 @@ def build_codex_trace(
         "token_usages": [usage] if usage else [],
     }
     errors = list(extracted["errors"])
+    event_stream_corrupt = any(
+        error.get("error_type") == "codex_events_json_decode_error"
+        for error in errors
+    )
     if execution.timed_out:
         errors.append({"type": "timeout", "max_time_reached": True})
     elif execution.return_code != 0:
@@ -329,7 +357,7 @@ def build_codex_trace(
         "trace_schema": "codex_exec_v1",
         "harness": "codex_exec",
         "conversation_id": extracted["thread_id"] or execution.attempt_id,
-        "eval_output": extracted["final_output"],
+        "eval_output": "" if event_stream_corrupt else extracted["final_output"],
         "events": events,
         "metrics": metrics,
         "metrics_breakdown": {"default": metrics},
@@ -481,7 +509,10 @@ def run_codex_sample(
         events_path=events_path.name,
         stderr_path=stderr_path.name,
     )
-    events = load_codex_events(events_path)
+    events = load_codex_events(
+        events_path,
+        allow_truncated_final_line=timed_out,
+    )
     trace = build_codex_trace(events, execution)
     trace_id = trace["conversation_id"]
     trace_path = log_dir / f"trace_{trace_id}.json"
