@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _env_loca = os.environ.get("LOCA_BENCH_PATH")
 LOCA_BENCH_PATH = Path(_env_loca) if _env_loca else Path(__file__).parent.parent.parent / "LOCA-bench"
@@ -133,10 +133,14 @@ def setup_proposer_workspace(workspace_dir: str) -> None:
 
 
 def get_mcp_config(workspace_dir: str) -> dict:
-    workspace = Path(workspace_dir).resolve()
+    docker_workspace = workspace_dir.startswith("/workspace/")
+    if docker_workspace:
+        workspace = PurePosixPath(workspace_dir)
+        loca_root = PurePosixPath("/loca-bench")
+    else:
+        workspace = Path(workspace_dir).resolve()
+        loca_root = LOCA_BENCH_PATH
     gcloud_db_dir = workspace / "local_db" / "google_cloud"
-    docker_workspace = str(workspace).startswith("/workspace/")
-    loca_root = Path("/loca-bench") if docker_workspace else LOCA_BENCH_PATH
     server_script = loca_root / "mcp_convert" / "mcps" / "google_cloud" / "server.py"
     project_root = loca_root / "mcp_convert"
 

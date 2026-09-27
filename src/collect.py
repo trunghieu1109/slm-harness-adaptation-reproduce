@@ -26,7 +26,8 @@ import re
 from pathlib import Path
 
 from .runner import run_single_instance_agentic
-from .task_setups import preprocess_example, get_tools, setup_servers, teardown_servers
+from .openhands_task_tools import get_tools
+from .task_setups import preprocess_example, setup_servers, teardown_servers
 
 
 def _print_effective_config(config: dict) -> None:

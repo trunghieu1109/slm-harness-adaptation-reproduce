@@ -1,0 +1,97 @@
+cd ~/slm-harness-adaptation-reproduce
+
+# Chỉ thay giá trị này
+task_id="refactorbench"
+
+model_name="qwen3.5-9b"
+max_examples=30
+n_responses=3
+
+run_stamp="$(date +%Y%m%d-%H%M%S)"
+rollout_version="${task_id}_baseline30_r3_${run_stamp}"
+batch_dir="generated/baseline_batches/${rollout_version}"
+
+export UV_CACHE_DIR="$PWD/.uv-cache"
+
+container_uid="$(id -u)"
+if [ "$container_uid" -eq 0 ]; then
+  container_uid=1000
+fi
+
+printf 'task=%s\nrollout=%s\nbatch=%s\n' \
+  "$task_id" "$rollout_version" "$batch_dir"
+
+uv sync --frozen
+
+test -e .vertex-ai.json || printf '%s\n' '{}' > .vertex-ai.json
+
+env UID="$container_uid" docker compose build "$task_id"
+
+if [ "$task_id" = "refactorbench" ]; then
+  mkdir -p external
+
+  if [ ! -d external/RefactorBench/.git ]; then
+    git clone --depth 1 \
+      https://github.com/microsoft/RefactorBench.git \
+      external/RefactorBench
+  fi
+
+  export REFACTORBENCH_REPOS_DIR="$PWD/external/RefactorBench/repositories"
+
+  chmod -R a+rwX "$REFACTORBENCH_REPOS_DIR"
+  uv python install 3.11
+fi
+
+if [ "$task_id" = "webarena" ]; then
+  uvx webarena-verified env start --site shopping_admin
+
+  curl -sS -o /dev/null \
+    -w 'shopping_admin status=%{http_code}\n' \
+    http://localhost:7780/admin
+fi
+
+uv run python run.py prepare-baseline \
+  --manifest - \
+  --batch-dir "$batch_dir" <<EOF
+task_id,model_name,max_examples,rollout_version,n_responses
+$task_id,$model_name,$max_examples,$rollout_version,$n_responses
+EOF
+
+cat "$batch_dir"/configs/*.yaml
+
+uv run python run.py launch-baseline \
+  --batch-dir "$batch_dir" \
+  --yes
+
+printf 'results/%s/%s_*/rollouts/%s\n' \
+  "$task_id" "$model_name" "$rollout_version"
+
+run_dir="$(find "results/$task_id" \
+  -type d \
+  -path "*/rollouts/$rollout_version" \
+  -print -quit)"
+
+uv run python -m src.rollout_summary "$run_dir"
+
+------------------------ cho refactorbench:
+cd ~/slm-harness-adaptation-reproduce
+
+repo_dir="$(realpath external/RefactorBench/repositories)"
+
+export REFACTORBENCH_REPOS_DIR="$repo_dir"
+printf '\nREFACTORBENCH_REPOS_DIR=%s\n' "$repo_dir" >> .env
+
+chmod -R a+rwX "$REFACTORBENCH_REPOS_DIR"
+
+uv run python - <<'PY'
+import os
+from pathlib import Path
+
+root = Path(os.environ["REFACTORBENCH_REPOS_DIR"])
+repo = root / "salt_refactor"
+
+print("REFACTORBENCH_REPOS_DIR:", root)
+print("salt_refactor exists:", repo.is_dir())
+
+assert repo.is_dir(), f"Repository not found: {repo}"
+PY

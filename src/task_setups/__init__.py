@@ -4,11 +4,6 @@ import random
 import shutil
 from pathlib import Path
 
-from openhands.sdk import Tool
-from openhands.tools.browser_use import BrowserToolSet
-from openhands.tools.terminal import TerminalTool
-from openhands.tools.file_editor import FileEditorTool
-
 from .webarena_servers import (
     preprocess_example as _webarena_preprocess_example,
     collect_required_sites,
@@ -56,18 +51,6 @@ ATTENDANCE_PAYROLL_AUDIT_TASK_IDS = frozenset(
 )
 
 
-def _webarena_browser_tool_params(workspace_dir: str | None) -> dict:
-    """Build per-workspace browser-use paths to avoid profile collisions."""
-    if not workspace_dir:
-        return {}
-
-    browser_root = os.path.join(workspace_dir, ".browser_use")
-    return {
-        "user_data_dir": os.path.join(browser_root, "profile"),
-        "downloads_path": os.path.join(browser_root, "downloads"),
-    }
-
-
 def preprocess_example(task_id: str, example: dict) -> dict:
     """Apply task-specific preprocessing to an example before running the agent."""
     if task_id == "webarena":
@@ -97,20 +80,6 @@ def preprocess_example(task_id: str, example: dict) -> dict:
         example["prompt"] = _browsecompplus.format_prompt(example["query"])
         return example
     return example
-
-
-def get_tools(task_id: str, workspace_dir: str | None = None) -> list:
-    """Return the list of Tools appropriate for a task."""
-    if task_id == "webarena":
-        return [
-            Tool(
-                name=BrowserToolSet.name,
-                params=_webarena_browser_tool_params(workspace_dir),
-            )
-        ]
-    if task_id == "tau2_airline":
-        return []
-    return [Tool(name=TerminalTool.name), Tool(name=FileEditorTool.name)]
 
 
 def setup_workspace(task_id: str, workspace_dir: str, log_dir: str, example: dict) -> None:

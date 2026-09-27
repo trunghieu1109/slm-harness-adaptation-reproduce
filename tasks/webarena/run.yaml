@@ -11,6 +11,7 @@ resume: false
 is_agentic: true
 use_docker: true
 server_image: "webarena:latest"
+codex_server_image: "webarena_codex:latest"
 docker_network: "webarena-net"
 max_time: 600
 

@@ -692,6 +692,7 @@ def build_baseline_prepared_runs(
     manifest_text: str,
     records: list[dict[str, Any]],
     batch_dir: Path,
+    harness: str = "openhands",
 ) -> list[BaselinePreparedRun]:
     configs_dir = batch_dir / "configs"
     logs_dir = batch_dir / "logs"
@@ -709,6 +710,10 @@ def build_baseline_prepared_runs(
 
         agent_file = record.get("agent_file")
         rollout_version = resolve_baseline_rollout_version(base_run_config, record.get("rollout_version"))
+        if harness == "codex_exec" and record.get("rollout_version") is None:
+            rollout_version = "baseline_codex_exec"
+        if harness == "codex_exec" and agent_file is not None:
+            raise ValueError("Codex baseline does not accept OpenHands agent_file entries")
         n_responses = record.get("n_responses", base_run_config.get("n_responses"))
         if n_responses is None:
             raise ValueError(f"Task {record['task_id']} base config does not define n_responses")
@@ -728,6 +733,11 @@ def build_baseline_prepared_runs(
         config["max_examples"] = record["max_examples"]
         config["n_responses"] = n_responses
         config["rollout_version"] = rollout_version
+        config["harness"] = harness
+        if harness == "codex_exec":
+            config["server_image"] = config.pop("codex_server_image")
+        else:
+            config.pop("codex_server_image", None)
         if agent_file is None:
             config.pop("agent_file", None)
         else:
@@ -764,6 +774,7 @@ def build_baseline_prepared_runs(
     batch_metadata = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "execution": "sequential",
+        "harness": harness,
         "runs": [asdict(run) for run in prepared_runs],
     }
     with open(batch_dir / "batch.json", "w", encoding="utf-8") as handle:
@@ -1851,12 +1862,18 @@ def run_baseline_pipeline(
     launcher_log_path: Path,
     launcher_log_lock: threading.Lock,
 ) -> dict[str, Any]:
+    run_config = strict_load_yaml(Path(run.run_config_path))
+    collect_module = (
+        "src.collect_codex"
+        if run_config.get("harness") == "codex_exec"
+        else "src.collect"
+    )
     collect_command = [
         "uv",
         "run",
         "python",
         "-m",
-        "src.collect",
+        collect_module,
         "--config",
         run.run_config_path,
     ]
@@ -2134,7 +2151,7 @@ def prepare_baseline_command(args: argparse.Namespace) -> int:
     manifest_text = load_manifest_text(args.manifest)
     records = parse_baseline_manifest_table(manifest_text)
     batch_dir = build_baseline_batch_dir(args.batch_dir)
-    runs = build_baseline_prepared_runs(manifest_text, records, batch_dir)
+    runs = build_baseline_prepared_runs(manifest_text, records, batch_dir, args.harness)
     print_baseline_prepared_runs(runs, batch_dir)
     print()
     print(f"Batch metadata: {batch_dir / 'batch.json'}")
@@ -2226,7 +2243,7 @@ def run_baseline_command(args: argparse.Namespace) -> int:
     manifest_text = load_manifest_text(args.manifest)
     records = parse_baseline_manifest_table(manifest_text)
     batch_dir = build_baseline_batch_dir(args.batch_dir)
-    runs = build_baseline_prepared_runs(manifest_text, records, batch_dir)
+    runs = build_baseline_prepared_runs(manifest_text, records, batch_dir, args.harness)
     print_baseline_prepared_runs(runs, batch_dir)
     if not args.yes and not prompt_for_confirmation("Launch these baseline runs now?"):
         print(f"Prepared batch kept at {batch_dir}")
@@ -2373,6 +2390,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Batch directory to create",
     )
+    prepare_baseline_parser.add_argument(
+        "--harness",
+        choices=("openhands", "codex_exec"),
+        default="openhands",
+        help="Agent harness used for baseline collection",
+    )
     prepare_baseline_parser.set_defaults(func=prepare_baseline_command)
 
     prepare_post_full_parser = subparsers.add_parser(
@@ -2434,6 +2457,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_baseline_parser.add_argument("--manifest", type=str, default="-", help="Manifest table path or '-' for stdin")
     run_baseline_parser.add_argument("--batch-dir", type=str, default=None, help="Batch directory to create")
+    run_baseline_parser.add_argument(
+        "--harness",
+        choices=("openhands", "codex_exec"),
+        default="openhands",
+        help="Agent harness used for baseline collection",
+    )
     run_baseline_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     run_baseline_parser.set_defaults(func=run_baseline_command)
 
