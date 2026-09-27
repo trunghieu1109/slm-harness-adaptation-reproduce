@@ -12,6 +12,7 @@ resume: true
 is_agentic: true
 use_docker: true
 server_image: "woocommerce_stock_alert_s2l:latest"
+codex_server_image: "woocommerce_stock_alert_s2l_codex:latest"
 max_time: 600
 
 # rollout_version: "baseline"

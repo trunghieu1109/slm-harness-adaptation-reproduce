@@ -27,6 +27,14 @@ services:
       dockerfile: tasks/Dockerfile
       args:
         USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+  refactorbench_codex:
+    image: refactorbench_codex:latest
+    build:
+      context: .
+      dockerfile: tasks/Dockerfile.codex
+      args:
+        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   webarena:
     image: webarena:latest
     build:
@@ -34,6 +42,16 @@ services:
       dockerfile: tasks/Dockerfile
       args:
         USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+  webarena_codex:
+    image: webarena_codex:latest
+    build:
+      context: .
+      dockerfile: tasks/Dockerfile.codex-webarena
+      args:
+        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
+        PLAYWRIGHT_MCP_VERSION: ${PLAYWRIGHT_MCP_VERSION:-0.0.82}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.64.0-alpha-1789764292000}
   docbench:
     image: docbench:latest
     build:
@@ -55,6 +73,14 @@ services:
       dockerfile: tasks/Dockerfile.loca
       args:
         USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+  machine_operating_s2l_codex:
+    image: machine_operating_s2l_codex:latest
+    build:
+      context: .
+      dockerfile: tasks/Dockerfile.codex-loca
+      args:
+        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   woocommerce_stock_alert_s2l:
     image: woocommerce_stock_alert_s2l:latest
     build:
@@ -62,6 +88,14 @@ services:
       dockerfile: tasks/Dockerfile.loca
       args:
         USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+  woocommerce_stock_alert_s2l_codex:
+    image: woocommerce_stock_alert_s2l_codex:latest
+    build:
+      context: .
+      dockerfile: tasks/Dockerfile.codex-loca
+      args:
+        USER_UID: ${UID:?USER_UID not set — run with UID=$(id -u) docker compose build}
+        CODEX_VERSION: ${CODEX_VERSION:-0.149.0}
   # ab_testing_s2l:
   #   image: ab_testing_s2l:latest
   #   build:

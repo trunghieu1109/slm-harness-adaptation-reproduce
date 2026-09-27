@@ -27,6 +27,7 @@ wandb/
 
 workspace/
 experiments/
+generated*
 generated*/
 generated*
 docs/dep/
