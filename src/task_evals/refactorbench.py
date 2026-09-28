@@ -2,12 +2,13 @@
 
 import subprocess
 import tempfile
-
-_PYTHON311 = subprocess.check_output(["uv", "python", "find", "3.11"], text=True, stderr=subprocess.DEVNULL).strip()
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import dspy
+
+
+_PYTHON311_COMMAND = ("uv", "run", "--no-project", "--python", "3.11", "python")
 
 
 class ShortenMessageSignature(dspy.Signature):
@@ -132,7 +133,7 @@ def run_single_instance_eval(
             local_test_path.write_text(eval_script, encoding="utf-8")
 
             result = subprocess.run(
-                [_PYTHON311, str(local_test_path.name)],
+                [*_PYTHON311_COMMAND, str(local_test_path.name)],
                 cwd=eval_dir_path,
                 capture_output=True,
                 text=True,

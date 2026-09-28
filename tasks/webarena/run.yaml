@@ -5,7 +5,7 @@ prompt_name: "shopping_admin"
 
 max_examples: 30
 n_responses: 1
-agent_batch_size: 6
+agent_batch_size: 12
 resume: true
 
 is_agentic: true

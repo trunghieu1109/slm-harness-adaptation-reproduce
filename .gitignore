@@ -31,7 +31,8 @@ generated*
 generated*/
 generated*
 docs/dep/
-scripts/
+scripts/*
+!scripts/cleanup_codex_plugin_caches.py
 figures/
 plots/
 .roar/

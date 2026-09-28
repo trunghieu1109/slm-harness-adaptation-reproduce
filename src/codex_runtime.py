@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -184,6 +185,14 @@ def write_additive_instructions(
 def _console_log(prefix: str, message: str) -> None:
     with CONSOLE_OUTPUT_LOCK:
         print(f"{prefix} {message}", flush=True)
+
+
+def cleanup_codex_plugin_cache(codex_home: Path) -> bool:
+    plugin_cache = codex_home / ".tmp" / "plugins"
+    if not plugin_cache.exists():
+        return False
+    shutil.rmtree(plugin_cache)
+    return True
 
 
 def _stream_pipe(pipe: Any, output_path: Path, console_prefix: str) -> None:
@@ -495,6 +504,8 @@ def run_codex_sample(
             text=True,
         )
         _console_log(run_prefix, f"Removed container {container_name}")
+        if cleanup_codex_plugin_cache(config_dir):
+            _console_log(run_prefix, f"Removed Codex plugin cache from {config_dir}")
 
     finished_at = datetime.now(timezone.utc)
     execution = CodexExecution(

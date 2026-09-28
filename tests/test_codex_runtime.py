@@ -14,6 +14,7 @@ from src.codex_runtime import (
     CodexModelConfig,
     _stream_pipe,
     build_codex_trace,
+    cleanup_codex_plugin_cache,
     get_additive_instructions,
     get_codex_mcp_config,
     load_codex_events,
@@ -185,6 +186,25 @@ def test_codex_stream_is_written_to_file_and_console(
     assert capsys.readouterr().out == (
         '[codex-test][event] {"type":"thread.started"}\n'
     )
+
+
+def test_cleanup_codex_plugin_cache_preserves_run_metadata(tmp_path: Path) -> None:
+    codex_home = tmp_path / "example0_rollout0_codex_home_attempt"
+    plugin_cache = codex_home / ".tmp" / "plugins"
+    plugin_cache.mkdir(parents=True)
+    (plugin_cache / "cached-plugin.txt").write_text("cache", encoding="utf-8")
+    config_path = codex_home / "config.toml"
+    config_path.write_text("model = 'test'", encoding="utf-8")
+    session_path = codex_home / "sessions" / "rollout.jsonl"
+    session_path.parent.mkdir()
+    session_path.write_text("{}", encoding="utf-8")
+
+    assert cleanup_codex_plugin_cache(codex_home) is True
+
+    assert not plugin_cache.exists()
+    assert config_path.exists()
+    assert session_path.exists()
+    assert cleanup_codex_plugin_cache(codex_home) is False
 
 
 def test_codex_event_loader_records_truncated_final_line_after_timeout(
