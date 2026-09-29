@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import src.codex_runtime as codex_runtime
 from src.collect_codex import _failed_rollouts
 from src.codex_runtime import (
     CodexExecution,
@@ -45,9 +46,10 @@ def test_codex_config_uses_responses_api_and_stdio_mcp() -> None:
     assert parsed["model_providers"]["benchmark"]["wire_api"] == "responses"
     assert parsed["mcp_servers"]["google_cloud"]["command"] == "/workspace/.venv/bin/python"
     assert parsed["mcp_servers"]["google_cloud"]["required"] is True
+    assert parsed["mcp_servers"]["google_cloud"]["startup_timeout_sec"] == 120
     assert parsed["model_reasoning_effort"] == "none"
     assert parsed["sandbox_mode"] == "danger-full-access"
-    assert "features" not in parsed
+    assert parsed["features"]["plugins"] is False
 
 
 def test_system_prompt_is_written_as_additive_agents_instructions(tmp_path: Path) -> None:
@@ -276,6 +278,68 @@ def test_codex_collector_reports_nonzero_rollout_return_codes() -> None:
     assert _failed_rollouts(results) == [((1, 0), 1), ((2, 3), 137)]
 
 
+def test_codex_docker_start_failure_is_saved_as_failed_rollout(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "example0_rollout0"
+    log_dir = tmp_path / "example0_rollout0_logs"
+
+    def setup_test_workspace(*args) -> None:
+        workspace.mkdir()
+        log_dir.mkdir()
+
+    docker_failure = subprocess.CompletedProcess(
+        args=["docker", "run"],
+        returncode=1,
+        stdout="",
+        stderr="docker daemon unavailable",
+    )
+    monkeypatch.setattr(codex_runtime, "setup_workspace", setup_test_workspace)
+    monkeypatch.setattr(
+        codex_runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: docker_failure,
+    )
+
+    model_config = CodexModelConfig(
+        model="Qwen/Qwen3.5-9B",
+        provider="benchmark",
+        api_base="http://model.example/v1",
+        api_key="EMPTY",
+        api_key_env="CODEX_MODEL_API_KEY",
+        context_window=150000,
+        reasoning_effort="none",
+    )
+    result = codex_runtime.run_codex_sample(
+        task_id="machine_operating_s2l",
+        example={"example_id": 0, "rollout_id": 0, "prompt": "Run task."},
+        system_prompt="Use the benchmark MCP tools.",
+        workspace_dir=workspace,
+        server_image="machine_operating_s2l_codex:latest",
+        model_config=model_config,
+        max_time=600,
+    )
+
+    execution = result["run_result"]["execution"]
+    assert execution["return_code"] == 1
+    assert execution["timed_out"] is False
+    assert result["run_result"]["events"] == [
+        {
+            "type": "error",
+            "error_type": "docker_container_start_failed",
+            "return_code": 1,
+            "stdout": "",
+            "stderr": "docker daemon unavailable",
+        }
+    ]
+    metadata = json.loads((log_dir / "run_meta.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "failed"
+    assert (log_dir / metadata["stderr_file"]).read_text(encoding="utf-8") == (
+        "docker daemon unavailable"
+    )
+
+
 def test_codex_task_images_extend_their_openhands_base_images() -> None:
     refactorbench_dockerfile = Path("tasks/Dockerfile.codex").read_text(
         encoding="utf-8"
@@ -298,6 +362,8 @@ def test_codex_task_images_extend_their_openhands_base_images() -> None:
     assert "ARG BASE_IMAGE=refactorbench:latest" in refactorbench_dockerfile
     assert "ARG BASE_IMAGE=webarena:latest" in webarena_dockerfile
     assert "mcp_convert" not in loca_dockerfile
+    assert "/etc/profile.d/benchmark-venv.sh" in loca_dockerfile
+    assert 'export PATH="/workspace/.venv/bin:$PATH"' in loca_dockerfile
     assert "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" in webarena_dockerfile
     assert "playwright install" not in webarena_dockerfile
     assert "chromium.executable_path" in webarena_dockerfile

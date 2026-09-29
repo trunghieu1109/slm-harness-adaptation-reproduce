@@ -106,6 +106,9 @@ def render_codex_config(
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
         "",
+        "[features]",
+        "plugins = false",
+        "",
         f"[model_providers.{_toml_string(model_config.provider)}]",
         'name = "Benchmark OpenAI-compatible endpoint"',
         f"base_url = {_toml_string(model_config.api_base)}",
@@ -122,7 +125,7 @@ def render_codex_config(
                 f"command = {_toml_string(server['command'])}",
                 f"args = {_toml_string_list(server.get('args', []))}",
                 "required = true",
-                "startup_timeout_sec = 30",
+                "startup_timeout_sec = 120",
                 "tool_timeout_sec = 120",
             ]
         )
@@ -403,6 +406,108 @@ def _write_trace_markdown(trace: dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(parts), encoding="utf-8")
 
 
+def _write_codex_result(
+    example: dict[str, Any],
+    log_dir: Path,
+    config_dir: Path,
+    run_prefix: str,
+    execution: CodexExecution,
+) -> dict[str, Any]:
+    events_path = log_dir / execution.events_path
+    stderr_path = log_dir / execution.stderr_path
+    events = load_codex_events(
+        events_path,
+        allow_truncated_final_line=execution.timed_out,
+    )
+    trace = build_codex_trace(events, execution)
+    trace_id = trace["conversation_id"]
+    trace_path = log_dir / f"trace_{trace_id}.json"
+    raw_trace_path = log_dir / f"raw_trace_{trace_id}.json"
+    trace_markdown_path = log_dir / f"trace_{trace_id}.md"
+    trace_path.write_text(
+        json.dumps(trace, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    raw_trace_path.write_text(
+        json.dumps(events, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    _write_trace_markdown(trace, trace_markdown_path)
+
+    status = (
+        "completed"
+        if execution.return_code == 0 and not execution.timed_out
+        else "failed"
+    )
+    run_metadata = {
+        "harness": "codex_exec",
+        "status": status,
+        "attempt_id": execution.attempt_id,
+        "conversation_id": trace_id,
+        "trace_file": trace_path.name,
+        "raw_trace_file": raw_trace_path.name,
+        "events_file": events_path.name,
+        "stderr_file": stderr_path.name,
+        "codex_home": config_dir.name,
+        "codex_version": execution.codex_version,
+        "return_code": execution.return_code,
+        "timed_out": execution.timed_out,
+        "started_at": execution.started_at,
+        "finished_at": execution.finished_at,
+        "duration_seconds": execution.duration_seconds,
+    }
+    (log_dir / "run_meta.json").write_text(
+        json.dumps(run_metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    _console_log(
+        run_prefix,
+        f"Finished status={status} return_code={execution.return_code} "
+        f"duration={execution.duration_seconds:.1f}s trace={trace_path}",
+    )
+
+    result = dict(example)
+    result["run_result"] = trace
+    return result
+
+
+def _write_subprocess_failure(
+    events_path: Path,
+    stderr_path: Path,
+    error_type: str,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    event = {
+        "type": "error",
+        "error_type": error_type,
+        "return_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+    events_path.write_text(
+        json.dumps(event, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    stderr_path.write_text(result.stderr, encoding="utf-8")
+
+
+def _remove_codex_container(container_name: str, run_prefix: str) -> None:
+    result = subprocess.run(
+        ["docker", "rm", "--force", container_name],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        _console_log(run_prefix, f"Removed container {container_name}")
+        return
+    _console_log(
+        run_prefix,
+        f"Failed to remove container {container_name}: "
+        f"return_code={result.returncode} stderr={result.stderr.strip()}",
+    )
+
+
 def run_codex_sample(
     task_id: str,
     example: dict[str, Any],
@@ -470,40 +575,85 @@ def run_codex_sample(
     docker_env[model_config.api_key_env] = model_config.api_key
     started_at = datetime.now(timezone.utc)
     started_monotonic = time.monotonic()
-    subprocess.run(
+    start_result = subprocess.run(
         docker_command,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=docker_env,
     )
+    if start_result.returncode != 0:
+        _write_subprocess_failure(
+            events_path,
+            stderr_path,
+            "docker_container_start_failed",
+            start_result,
+        )
+        _console_log(
+            run_prefix,
+            f"Failed to start container {container_name}: "
+            f"return_code={start_result.returncode} "
+            f"stderr={start_result.stderr.strip()}",
+        )
+        finished_at = datetime.now(timezone.utc)
+        execution = CodexExecution(
+            attempt_id=attempt_id,
+            container_name=container_name,
+            codex_version="",
+            return_code=start_result.returncode,
+            timed_out=False,
+            started_at=started_at.isoformat(),
+            finished_at=finished_at.isoformat(),
+            duration_seconds=time.monotonic() - started_monotonic,
+            events_path=events_path.name,
+            stderr_path=stderr_path.name,
+        )
+        return _write_codex_result(
+            example,
+            log_dir,
+            config_dir,
+            run_prefix,
+            execution,
+        )
+
     _console_log(run_prefix, f"Started container {container_name}")
     try:
         version_result = subprocess.run(
             ["docker", "exec", container_name, "codex", "--version"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        _console_log(
-            run_prefix,
-            f"Running {version_result.stdout.strip()} in {container_name}",
-        )
-        return_code, timed_out = _run_codex_exec(
-            container_name=container_name,
-            prompt=example["prompt"],
-            max_time=max_time,
-            events_path=events_path,
-            stderr_path=stderr_path,
-        )
-    finally:
-        subprocess.run(
-            ["docker", "rm", "--force", container_name],
             check=False,
             capture_output=True,
             text=True,
         )
-        _console_log(run_prefix, f"Removed container {container_name}")
+        codex_version = version_result.stdout.strip()
+        if version_result.returncode != 0:
+            _write_subprocess_failure(
+                events_path,
+                stderr_path,
+                "codex_version_check_failed",
+                version_result,
+            )
+            _console_log(
+                run_prefix,
+                f"Failed to run Codex in {container_name}: "
+                f"return_code={version_result.returncode} "
+                f"stderr={version_result.stderr.strip()}",
+            )
+            return_code = version_result.returncode
+            timed_out = False
+        else:
+            _console_log(
+                run_prefix,
+                f"Running {codex_version} in {container_name}",
+            )
+            return_code, timed_out = _run_codex_exec(
+                container_name=container_name,
+                prompt=example["prompt"],
+                max_time=max_time,
+                events_path=events_path,
+                stderr_path=stderr_path,
+            )
+    finally:
+        _remove_codex_container(container_name, run_prefix)
         if cleanup_codex_plugin_cache(config_dir):
             _console_log(run_prefix, f"Removed Codex plugin cache from {config_dir}")
 
@@ -511,7 +661,7 @@ def run_codex_sample(
     execution = CodexExecution(
         attempt_id=attempt_id,
         container_name=container_name,
-        codex_version=version_result.stdout.strip(),
+        codex_version=codex_version,
         return_code=return_code,
         timed_out=timed_out,
         started_at=started_at.isoformat(),
@@ -520,47 +670,10 @@ def run_codex_sample(
         events_path=events_path.name,
         stderr_path=stderr_path.name,
     )
-    events = load_codex_events(
-        events_path,
-        allow_truncated_final_line=timed_out,
-    )
-    trace = build_codex_trace(events, execution)
-    trace_id = trace["conversation_id"]
-    trace_path = log_dir / f"trace_{trace_id}.json"
-    raw_trace_path = log_dir / f"raw_trace_{trace_id}.json"
-    trace_markdown_path = log_dir / f"trace_{trace_id}.md"
-    trace_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
-    raw_trace_path.write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8")
-    _write_trace_markdown(trace, trace_markdown_path)
-
-    status = "completed" if return_code == 0 and not timed_out else "failed"
-    run_metadata = {
-        "harness": "codex_exec",
-        "status": status,
-        "attempt_id": attempt_id,
-        "conversation_id": trace_id,
-        "trace_file": trace_path.name,
-        "raw_trace_file": raw_trace_path.name,
-        "events_file": events_path.name,
-        "stderr_file": stderr_path.name,
-        "codex_home": config_dir.name,
-        "codex_version": execution.codex_version,
-        "return_code": return_code,
-        "timed_out": timed_out,
-        "started_at": execution.started_at,
-        "finished_at": execution.finished_at,
-        "duration_seconds": execution.duration_seconds,
-    }
-    (log_dir / "run_meta.json").write_text(
-        json.dumps(run_metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    _console_log(
+    return _write_codex_result(
+        example,
+        log_dir,
+        config_dir,
         run_prefix,
-        f"Finished status={status} return_code={return_code} "
-        f"duration={execution.duration_seconds:.1f}s trace={trace_path}",
+        execution,
     )
-
-    result = dict(example)
-    result["run_result"] = trace
-    return result

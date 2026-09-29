@@ -21,6 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && mkdir -p /workspace/.codex /workspace/project \
  && chown -R appuser:appuser /workspace/.codex /workspace/project
 
+# Codex executes shell commands through `bash -lc`. Debian's login shell
+# replaces the image-level PATH, so restore the benchmark virtualenv after
+# /etc/profile initializes its defaults.
+RUN printf '%s\n' \
+    'export VIRTUAL_ENV=/workspace/.venv' \
+    'export PATH="/workspace/.venv/bin:$PATH"' \
+    > /etc/profile.d/benchmark-venv.sh \
+ && chmod 0644 /etc/profile.d/benchmark-venv.sh
+
 USER appuser
 
 ENTRYPOINT ["sleep", "infinity"]
