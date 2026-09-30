@@ -161,9 +161,9 @@ def run_optimization(
 
     config_dir = os.path.join(run_dir, "shared", "config")
     os.makedirs(config_dir, exist_ok=True)
-    with open(os.path.join(config_dir, "used_config.yaml"), "w") as f:
+    with open(os.path.join(config_dir, "used_config.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(effective_config, f, sort_keys=False)
-    with open(os.path.join(config_dir, "seed_config.py"), "w") as f:
+    with open(os.path.join(config_dir, "seed_config.py"), "w", encoding="utf-8") as f:
         f.write(seed_code)
 
     adapter = AgentOptimizationAdapter(
@@ -212,14 +212,14 @@ def run_optimization(
     os.makedirs(config_dir, exist_ok=True)
 
     best_config_path = os.path.join(config_dir, "best_config.py")
-    with open(best_config_path, "w") as f:
+    with open(best_config_path, "w", encoding="utf-8") as f:
         f.write(best["agent_code"])
 
     all_candidates_dir = os.path.join(config_dir, "all_candidates")
     os.makedirs(all_candidates_dir, exist_ok=True)
     for idx, (cand, score) in enumerate(zip(result.candidates, result.val_aggregate_scores)):
         cand_path = os.path.join(all_candidates_dir, f"candidate_{idx}_score{score:.3f}.py")
-        with open(cand_path, "w") as f:
+        with open(cand_path, "w", encoding="utf-8") as f:
             f.write(f"# val_score: {score}\n")
             f.write(cand["agent_code"])
 
@@ -248,7 +248,7 @@ def run_optimization(
         "cost_summary": {**cost_summary, "total_cost": total_cost},
     }
     summary_path = os.path.join(config_dir, "optimization_summary.json")
-    with open(summary_path, "w") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     print(f"Best score: {best_score}")
@@ -332,7 +332,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     config = {}
     if args.config:
-        with open(args.config, "r") as f:
+        with open(args.config, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         print(f"Loaded config from {args.config}")
 

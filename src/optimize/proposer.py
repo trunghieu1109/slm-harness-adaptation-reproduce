@@ -125,7 +125,7 @@ def _create_skill_file(content: str, name: str, dest_dir: str) -> Skill:
     skill_dir = os.path.join(dest_dir, name)
     os.makedirs(skill_dir, exist_ok=True)
     skill_file = os.path.join(skill_dir, "SKILL.md")
-    with open(skill_file, "w") as f:
+    with open(skill_file, "w", encoding="utf-8") as f:
         f.write(f"---\nname: {name}\n---\n\n{content}")
     skill = Skill.load(path=skill_file, strict=False)
     skill.is_agentskills_format = False
@@ -149,20 +149,20 @@ def load_proposer_skills(
 
     sdk_ref_path = source_paths["sdk_reference"]
     if sdk_ref_path.exists():
-        with open(sdk_ref_path) as f:
+        with open(sdk_ref_path, encoding="utf-8") as f:
             sdk_content = f.read()
         skills.append(_create_skill_file(sdk_content, "sdk_reference", skills_dir))
 
     read_trajectory_path = source_paths["read_trajectory"]
     if read_trajectory_path.exists():
-        with open(read_trajectory_path) as f:
+        with open(read_trajectory_path, encoding="utf-8") as f:
             read_trajectory_content = f.read()
         skills.append(_create_skill_file(read_trajectory_content, "read_trajectory", skills_dir))
 
     if use_adaptation_guide:
         adaptation_path = source_paths["adaptation"]
         if adaptation_path.exists():
-            with open(adaptation_path) as f:
+            with open(adaptation_path, encoding="utf-8") as f:
                 adaptation_content = f.read()
             skills.append(_create_skill_file(adaptation_content, "adaptation_guide", skills_dir))
 
@@ -215,7 +215,7 @@ class AgentProposer:
     def _write_proposal_metadata(self, iter_dir: str, record: dict[str, Any]):
         path = self._iter_proposal_metadata_path(iter_dir)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2)
 
     def _setup_workspace(
@@ -232,7 +232,7 @@ class AgentProposer:
 
         project_dir = os.path.join(workspace, "project")
         os.makedirs(project_dir)
-        with open(os.path.join(project_dir, "agent.py"), "w") as f:
+        with open(os.path.join(project_dir, "agent.py"), "w", encoding="utf-8") as f:
             f.write(candidate["agent_code"])
 
         self.memory.stage_workspace(workspace)
@@ -302,7 +302,7 @@ class AgentProposer:
         self.logger.log(f"[iter {iteration}] Proposer workspace{suffix}: {workspace}")
 
         prompt_path = os.path.join(workspace, "system_prompt.md")
-        with open(prompt_path, "w") as f:
+        with open(prompt_path, "w", encoding="utf-8") as f:
             f.write(build_proposer_system_prompt(self.use_adaptation_guide))
 
         with get_workspace_context(
@@ -383,7 +383,7 @@ class AgentProposer:
 
             if num_strategies == 1:
                 try:
-                    with open(os.path.join(workspace, "project", "agent.py")) as f:
+                    with open(os.path.join(workspace, "project", "agent.py"), encoding="utf-8") as f:
                         new_code = f.read()
                     files_to_validate = [(None, new_code)]
                 except FileNotFoundError:
@@ -394,7 +394,7 @@ class AgentProposer:
                 for k in range(1, num_strategies + 1):
                     path = os.path.join(workspace, "project", f"agent_{k}.py")
                     if os.path.exists(path):
-                        with open(path) as f:
+                        with open(path, encoding="utf-8") as f:
                             files_to_validate.append((k, f.read()))
                     else:
                         self.logger.log(f"[iter {iteration}] Strategy {k} file not found, skipping")

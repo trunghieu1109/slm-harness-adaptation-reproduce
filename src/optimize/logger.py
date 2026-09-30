@@ -13,7 +13,7 @@ class GEPAFileLogger:
         self._logger.setLevel(logging.DEBUG)
         self._logger.propagate = False
 
-        fh = logging.FileHandler(self.log_path)
+        fh = logging.FileHandler(self.log_path, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         self._logger.addHandler(fh)
 

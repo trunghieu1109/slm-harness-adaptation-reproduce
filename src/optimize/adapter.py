@@ -97,8 +97,8 @@ def _run_agent_worker(
     os.makedirs(config_dir, exist_ok=True)
     agent_file = os.path.join(config_dir, f"example{i}_agent.py")
     prompt_file = os.path.join(config_dir, f"example{i}_prompt.md")
-    Path(agent_file).write_text(candidate["agent_code"])
-    Path(prompt_file).write_text(task_prompt)
+    Path(agent_file).write_text(candidate["agent_code"], encoding="utf-8")
+    Path(prompt_file).write_text(task_prompt, encoding="utf-8")
 
     log_dir = Path(workspace_base).parent / f"{Path(workspace_base).name}_logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -297,7 +297,7 @@ class AgentOptimizationAdapter(GEPAAdapter):
         summary = {**self._cost_tracker, "total": total}
         path = self._cost_summary_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
         self.logger.log(
             f"[cost] total=${total['accumulated_cost']:.4f} "
@@ -315,7 +315,7 @@ class AgentOptimizationAdapter(GEPAAdapter):
         os.makedirs(candidates_dir, exist_ok=True)
         filename = "current.py" if self._phase == "reflection" else "proposed.py"
         path = os.path.join(candidates_dir, filename)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(candidate["agent_code"])
         self.logger.log(f"[iter {self._gepa_iter}, {self._phase}] Saved candidate to {path}")
 
@@ -573,7 +573,7 @@ class AgentOptimizationAdapter(GEPAAdapter):
         proposer_dir = os.path.join(self._iter_dir(), "proposer")
         os.makedirs(proposer_dir, exist_ok=True)
         reflection_path = os.path.join(proposer_dir, "reflection.json")
-        with open(reflection_path, "w") as f:
+        with open(reflection_path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, default=str)
         self.logger.log(f"[iter {self._gepa_iter}] Reflection inputs saved to {reflection_path}")
 
@@ -607,7 +607,7 @@ class AgentOptimizationAdapter(GEPAAdapter):
         for k, prop in enumerate(proposals):
             prop_dir = os.path.join(proposals_root, f"prop_{k:02d}")
             os.makedirs(prop_dir, exist_ok=True)
-            with open(os.path.join(candidates_dir, f"prop_{k:02d}.py"), "w") as f:
+            with open(os.path.join(candidates_dir, f"prop_{k:02d}.py"), "w", encoding="utf-8") as f:
                 f.write(prop["agent_code"])
 
             prop_tag = f"[iter {self._gepa_iter}, prop_{k:02d}]"

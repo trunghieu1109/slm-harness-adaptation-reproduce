@@ -106,7 +106,7 @@ class ProposerMemory:
     def _load(self) -> None:
         if not os.path.exists(self._memory_path):
             return
-        with open(self._memory_path) as f:
+        with open(self._memory_path, encoding="utf-8") as f:
             data = json.load(f)
         for entry in data:
             record = CandidateRecord.from_dict(entry)
@@ -115,7 +115,7 @@ class ProposerMemory:
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self._memory_path), exist_ok=True)
-        with open(self._memory_path, "w") as f:
+        with open(self._memory_path, "w", encoding="utf-8") as f:
             json.dump([r.to_dict() for r in self._records], f, indent=2, default=str)
 
     # ---- Recording methods ----
@@ -308,7 +308,7 @@ class ProposerMemory:
         os.makedirs(mem_dir, exist_ok=True)
 
         # Scoreboard
-        with open(os.path.join(mem_dir, "scoreboard.md"), "w") as f:
+        with open(os.path.join(mem_dir, "scoreboard.md"), "w", encoding="utf-8") as f:
             f.write(self.format_scoreboard())
 
         # Current: overview.md + trajectories/ from reflective dataset
@@ -316,7 +316,7 @@ class ProposerMemory:
         os.makedirs(current_dir, exist_ok=True)
         current = self.get_current()
         if current:
-            with open(os.path.join(current_dir, "overview.md"), "w") as f:
+            with open(os.path.join(current_dir, "overview.md"), "w", encoding="utf-8") as f:
                 f.write(self._format_current_overview(current))
         traj_dir = os.path.join(current_dir, "trajectories")
         os.makedirs(traj_dir, exist_ok=True)
@@ -333,7 +333,7 @@ class ProposerMemory:
                     os.path.join(teacher_traj_dir, f"example{i}.json"),
                 )
 
-        with open(os.path.join(mem_dir, "past_agents.md"), "w") as f:
+        with open(os.path.join(mem_dir, "past_agents.md"), "w", encoding="utf-8") as f:
             f.write(self.format_past_agents())
 
     def _append_candidate_header(self, lines: list[str], r: CandidateRecord) -> None:
@@ -528,5 +528,5 @@ class ProposerMemory:
 
         overview_path = os.path.join(iter_dir, "results.md")
         os.makedirs(iter_dir, exist_ok=True)
-        with open(overview_path, "w") as f:
+        with open(overview_path, "w", encoding="utf-8") as f:
             f.write(self._format_candidate_overview(record))
