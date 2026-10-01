@@ -257,7 +257,11 @@ def _codex_tool_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         thought = "\n\n".join(pending_messages)
         pending_messages = []
         status = item.get("status", "completed")
-        if item.get("error"):
+        if (
+            item.get("error")
+            or status == "failed"
+            or (item_type == "command_execution" and item.get("exit_code") not in (None, 0))
+        ):
             status = "error"
         calls.append(
             {
@@ -288,18 +292,49 @@ def extract_tool_calls(trace: dict[str, Any]) -> list[dict[str, Any]]:
 def pair_tool_calls(
     left_calls: list[dict[str, Any]], right_calls: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    def tool_key(call: dict[str, Any]) -> str:
+        return call["tool"].split(".")[-1]
+
+    left_count = len(left_calls)
+    right_count = len(right_calls)
+    matches = [[0] * (right_count + 1) for _ in range(left_count + 1)]
+    for left_index in range(left_count - 1, -1, -1):
+        for right_index in range(right_count - 1, -1, -1):
+            if tool_key(left_calls[left_index]) == tool_key(right_calls[right_index]):
+                matches[left_index][right_index] = 1 + matches[left_index + 1][right_index + 1]
+            else:
+                matches[left_index][right_index] = max(
+                    matches[left_index + 1][right_index],
+                    matches[left_index][right_index + 1],
+                )
+
     rows = []
-    for index in range(max(len(left_calls), len(right_calls))):
-        left = left_calls[index] if index < len(left_calls) else None
-        right = right_calls[index] if index < len(right_calls) else None
+    left_index = 0
+    right_index = 0
+    while left_index < left_count or right_index < right_count:
+        left = left_calls[left_index] if left_index < left_count else None
+        right = right_calls[right_index] if right_index < right_count else None
+        same_tool = (
+            left is not None and right is not None and tool_key(left) == tool_key(right)
+        )
+        if same_tool:
+            left_index += 1
+            right_index += 1
+        elif right is None or (
+            left is not None
+            and matches[left_index + 1][right_index] >= matches[left_index][right_index + 1]
+        ):
+            right = None
+            left_index += 1
+        else:
+            left = None
+            right_index += 1
         rows.append(
             {
-                "step": index + 1,
+                "step": len(rows) + 1,
                 "left": left,
                 "right": right,
-                "same_tool": left is not None
-                and right is not None
-                and left["tool"].split(".")[-1] == right["tool"].split(".")[-1],
+                "same_tool": same_tool,
             }
         )
     return rows

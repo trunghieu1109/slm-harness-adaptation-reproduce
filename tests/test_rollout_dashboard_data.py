@@ -4,6 +4,7 @@ from src.rollout_dashboard_data import (
     discover_runs,
     extract_tool_calls,
     overview_rows,
+    pair_tool_calls,
     preferred_run,
 )
 
@@ -128,4 +129,43 @@ def test_extract_codex_tool_calls_keeps_completed_items_only():
 
     assert len(calls) == 1
     assert calls[0]["tool"] == "google_sheet.update_cells"
-    assert "A3:H4" in calls[0]["arguments"]
+    assert calls[0]["arguments"] == {"range": "A3:H4"}
+    assert calls[0]["arguments_preview"] == '{"range": "A3:H4"}'
+    assert calls[0]["result_text"] == "updated"
+
+
+def test_pair_tool_calls_marks_matching_tools_by_short_name():
+    left = [
+        {"tool": "google_sheet.update_cells"},
+        {"tool": "terminal"},
+    ]
+    right = [
+        {"tool": "update_cells"},
+    ]
+
+    pairs = pair_tool_calls(left, right)
+
+    assert pairs == [
+        {"step": 1, "left": left[0], "right": right[0], "same_tool": True},
+        {"step": 2, "left": left[1], "right": None, "same_tool": False},
+    ]
+
+
+def test_pair_tool_calls_aligns_after_an_inserted_action():
+    left = [
+        {"tool": "terminal"},
+        {"tool": "google_cloud.bigquery_list_datasets"},
+        {"tool": "google_cloud.bigquery_run_query"},
+    ]
+    right = [
+        {"tool": "bigquery_list_datasets"},
+        {"tool": "bigquery_run_query"},
+    ]
+
+    pairs = pair_tool_calls(left, right)
+
+    assert [(pair["left"], pair["right"]) for pair in pairs] == [
+        (left[0], None),
+        (left[1], right[0]),
+        (left[2], right[1]),
+    ]

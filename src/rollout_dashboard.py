@@ -286,10 +286,12 @@ def paired_timeline_frame(pairs: list[dict[str, Any]]) -> pd.DataFrame:
         right = pair["right"]
         rows.append(
             {
-                "Step": pair["step"],
+                "#": pair["step"],
+                "Codex step": left["step"] if left else None,
                 "Codex status": status_text(left["status"]) if left else "— missing",
                 "Codex action": left["tool"] if left else "—",
                 "Codex intent": (left["summary"] or left["arguments_preview"]) if left else "",
+                "OpenHands step": right["step"] if right else None,
                 "OpenHands status": status_text(right["status"]) if right else "— missing",
                 "OpenHands action": right["tool"] if right else "—",
                 "OpenHands intent": (right["summary"] or right["arguments_preview"])
@@ -366,7 +368,7 @@ def render_paired_trace(
     with controls[1]:
         mode = st.selectbox(
             "Lọc timeline",
-            ("Tất cả step", "Khác tool", "Có lỗi hoặc thiếu"),
+            ("Tất cả step", "Lệch luồng", "Có lỗi hoặc thiếu"),
             key=f"paired-mode-{widget_key}",
         )
 
@@ -374,7 +376,7 @@ def render_paired_trace(
         pair
         for pair in pairs
         if (not query or call_matches(pair["left"], query) or call_matches(pair["right"], query))
-        and (mode != "Khác tool" or not pair["same_tool"])
+        and (mode != "Lệch luồng" or not pair["same_tool"])
         and (
             mode != "Có lỗi hoặc thiếu"
             or pair["left"] is None
@@ -393,10 +395,12 @@ def render_paired_trace(
         width="stretch",
         height=min(460, 42 + len(filtered) * 36),
         column_config={
-            "Step": st.column_config.NumberColumn(width="small"),
+            "#": st.column_config.NumberColumn(width="small"),
+            "Codex step": st.column_config.NumberColumn(width="small"),
             "Codex status": st.column_config.TextColumn(width="small"),
             "Codex action": st.column_config.TextColumn(width="medium"),
             "Codex intent": st.column_config.TextColumn(width="large"),
+            "OpenHands step": st.column_config.NumberColumn(width="small"),
             "OpenHands status": st.column_config.TextColumn(width="small"),
             "OpenHands action": st.column_config.TextColumn(width="medium"),
             "OpenHands intent": st.column_config.TextColumn(width="large"),
@@ -408,9 +412,11 @@ def render_paired_trace(
         "Mở chi tiết step",
         filtered,
         format_func=lambda pair: (
-            f"Step {pair['step']} · "
-            f"{pair['left']['tool'] if pair['left'] else '—'} ↔ "
-            f"{pair['right']['tool'] if pair['right'] else '—'}"
+            f"#{pair['step']} · "
+            f"Codex {pair['left']['step'] if pair['left'] else '—'} "
+            f"{pair['left']['tool'] if pair['left'] else ''} ↔ "
+            f"OpenHands {pair['right']['step'] if pair['right'] else '—'} "
+            f"{pair['right']['tool'] if pair['right'] else ''}"
         ),
         key=f"paired-step-{widget_key}",
     )
@@ -550,7 +556,7 @@ def render_trace_explorer(
     )
     with compare_tab:
         st.caption(
-            "Các tool call được đặt cạnh nhau theo thứ tự thực thi; dấu ≠ cho biết hai agent chọn tool khác nhau ở cùng step."
+            "Timeline được căn theo chuỗi tên tool; dấu ≠ là bước chỉ xuất hiện ở một agent, giúp các action tương ứng không bị lệch hàng."
         )
         render_paired_trace(codex_detail, openhands_detail, rollout)
     with codex_tab:
