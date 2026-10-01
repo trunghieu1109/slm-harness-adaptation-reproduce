@@ -24,7 +24,7 @@ test_n_responses: 3
 
 # Evaluation
 eval_lm: null
-agent_batch_size: 8
+agent_batch_size: 3
 eval_batch_size: 16
 
 # Reflection

@@ -147,6 +147,7 @@ def build_sdk_llm(lm: dspy.LM) -> LLM:
         output_cost_per_token=lm.kwargs.get("output_cost_per_token"),
         max_input_tokens=lm.kwargs.get("max_input_tokens"),
         max_output_tokens=lm.kwargs.get("max_output_tokens"),
+        temperature=lm.kwargs.get("temperature"),
         reasoning_effort=lm.kwargs.get("reasoning_effort", "low"),
         litellm_extra_body=lm.kwargs.get("extra_body", {}),
     )

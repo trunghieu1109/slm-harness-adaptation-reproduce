@@ -4,8 +4,8 @@ model_name: "qwen3.5-9b"
 
 prompt_name: "default"
 max_examples: 30
-n_responses: 1
-agent_batch_size: 12
+n_responses: 3
+agent_batch_size: 4
 eval_batch_size: 16
 resume: true
 
