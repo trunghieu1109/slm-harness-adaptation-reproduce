@@ -144,7 +144,10 @@ def get_mcp_config(workspace_dir: str) -> dict:
     server_script = loca_root / "mcp_convert" / "mcps" / "google_cloud" / "server.py"
     project_root = loca_root / "mcp_convert"
 
-    if docker_workspace or os.environ.get("LOCA_BENCH_PATH"):
+    if docker_workspace:
+        command = "/workspace/.venv-loca/bin/python"
+        args = [str(server_script)]
+    elif os.environ.get("LOCA_BENCH_PATH"):
         command = "/workspace/.venv/bin/python"
         args = [str(server_script)]
     else:
@@ -160,6 +163,8 @@ def get_mcp_config(workspace_dir: str) -> dict:
                     "GOOGLE_CLOUD_DATA_DIR": str(gcloud_db_dir),
                     "LOCA_QUIET": "1",
                 },
+                # The empty transform makes FastMCP use a legacy handshake.
+                "exclude_tags": [],
             }
         }
     }

@@ -41,6 +41,11 @@ ENV LOCA_BENCH_PATH=/loca-bench
 # directly with /workspace/.venv/bin/python without needing uv on PATH
 RUN uv pip install /loca-bench/mcp_convert
 
+RUN uv venv /workspace/.venv-loca \
+ && uv pip install --python /workspace/.venv-loca/bin/python \
+      'mcp==1.9.0' /loca-bench/mcp_convert \
+ && uv pip check --python /workspace/.venv-loca/bin/python
+
 EXPOSE 8000
 
 ENTRYPOINT ["python", "-m", "openhands.agent_server"]

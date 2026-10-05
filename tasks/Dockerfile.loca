@@ -45,6 +45,12 @@ ENV LOCA_BENCH_PATH=/loca-bench
 
 RUN uv pip install /loca-bench/mcp_convert
 
+# LOCA's MCP server uses the 1.x API; OpenHands uses MCP 2.x in the main venv.
+RUN uv venv /workspace/.venv-loca \
+ && uv pip install --python /workspace/.venv-loca/bin/python \
+      'mcp==1.9.0' /loca-bench/mcp_convert \
+ && uv pip check --python /workspace/.venv-loca/bin/python
+
 EXPOSE 8000
 
 ENTRYPOINT ["python", "-m", "openhands.agent_server"]

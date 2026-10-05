@@ -44,7 +44,7 @@ def test_codex_config_uses_responses_api_and_stdio_mcp() -> None:
 
     assert parsed["model"] == "Qwen/Qwen3.5-9B"
     assert parsed["model_providers"]["benchmark"]["wire_api"] == "responses"
-    assert parsed["mcp_servers"]["google_cloud"]["command"] == "/workspace/.venv/bin/python"
+    assert parsed["mcp_servers"]["google_cloud"]["command"] == "/workspace/.venv-loca/bin/python"
     assert parsed["mcp_servers"]["google_cloud"]["required"] is True
     assert parsed["mcp_servers"]["google_cloud"]["startup_timeout_sec"] == 120
     assert parsed["model_reasoning_effort"] == "none"
@@ -368,6 +368,11 @@ def test_codex_task_images_extend_their_openhands_base_images() -> None:
     assert "playwright install" not in webarena_dockerfile
     assert "chromium.executable_path" in webarena_dockerfile
     assert "WEBARENA_CHROMIUM_EXECUTABLE" in webarena_dockerfile
+
+    machine_dockerfile = Path("tasks/machine_operating_s2l/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert "uv venv /workspace/.venv-loca" in machine_dockerfile
 
     webarena_base_dockerfile = Path("tasks/webarena/Dockerfile").read_text(
         encoding="utf-8"
