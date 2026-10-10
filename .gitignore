@@ -37,3 +37,5 @@ figures/
 plots/
 .roar/
 configs/
+
+artifacts/

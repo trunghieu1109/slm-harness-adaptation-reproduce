@@ -169,6 +169,54 @@ uv run python -c "from src.utils import LM_DICT; print(sorted(LM_DICT))"
 
 Lệnh trên chỉ kiểm tra cấu hình, chưa gửi request inference.
 
+### Chạy thử Gemini trước khi chạy benchmark
+
+Đặt alias Gemini trong `configs/models.yaml`. Ví dụ cho Gemini API trực tiếp
+qua [endpoint tương thích OpenAI của Google](https://ai.google.dev/gemini-api/docs/openai):
+
+```yaml
+models:
+  - name: gemini-api
+    model: openai/gemini-3.1-pro-preview
+    api_base: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key: ${GEMINI_API_KEY}
+    reasoning_effort: low
+```
+
+Thêm `GEMINI_API_KEY` vào `.env`. Nếu dùng gateway, giữ model ID và `api_base`
+của gateway trong registry. Các lệnh bên dưới dùng alias `gemini-api`; thay
+`--model` nếu đặt alias khác.
+
+Test một request qua DSPy (luồng reflection/evaluation):
+
+```bash
+uv run python -m src.model_smoke_test --model gemini-api
+```
+
+Test qua OpenHands SDK (luồng agent của harness), gồm trả lời văn bản và gọi
+tool rồi đọc kết quả tool:
+
+```bash
+uv run python -m src.gemini_sdk_smoke_test --model gemini-api
+```
+
+SDK gửi 3 request khi chạy mặc định. Tool chỉ trả về token ngẫu nhiên trong bộ
+nhớ; không cần Docker. Chạy riêng từng kiểm tra hoặc thử prompt khác:
+
+```bash
+uv run python -m src.gemini_sdk_smoke_test --model gemini-api --test text
+uv run python -m src.gemini_sdk_smoke_test --model gemini-api --test tools
+uv run python -m src.model_smoke_test --model gemini-api --prompt 'Trả lời bằng tiếng Việt: 2 + 2 bằng bao nhiêu?'
+```
+
+Các script in response, thời gian và token usage; SDK còn in chi phí ước tính
+nếu registry/provider có pricing. Script trả exit code khác 0 khi request lỗi,
+response rỗng, hoặc kết quả không khớp. Prompt mặc định phải trả `GEMINI_OK`;
+prompt tùy chỉnh chỉ kiểm tra response không rỗng, hoặc dùng `--expect` để yêu
+cầu câu trả lời chính xác. Dùng `--max-tokens` (mặc định 2048) và `--timeout`
+(mặc định 60 giây/request) để điều chỉnh giới hạn. DSPy tắt cache và cả hai
+script tắt retry để mỗi lần chạy kiểm tra kết nối thực tế và lỗi hiển thị ngay.
+
 ## 5. Credential Vertex AI
 
 Nếu dùng Vertex AI, đặt service-account JSON tại `.vertex-ai.json` hoặc cấu

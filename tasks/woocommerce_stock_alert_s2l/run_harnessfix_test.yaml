@@ -1,0 +1,14 @@
+task_id: woocommerce_stock_alert_s2l
+data_path: /root/slm-harness-adaptation-reproduce/data/harnessfix/woocommerce_stock_alert_s2l/test.json
+model_name: qwen-vllm
+prompt_name: default
+max_examples: 98
+n_responses: 1
+agent_batch_size: 1
+eval_batch_size: 1
+resume: true
+is_agentic: true
+use_docker: true
+server_image: woocommerce_stock_alert_s2l:latest
+codex_server_image: woocommerce_stock_alert_s2l_codex:latest
+max_time: 600

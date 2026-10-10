@@ -52,8 +52,8 @@ _SUBAGENTS_DIR = "subagents"
 _DOCKER_START_MAX_ATTEMPTS = 3
 
 
-def _is_docker_port_error(exc: BaseException) -> bool:
-    """Return whether an exception indicates a host-port allocation conflict."""
+def _is_retryable_docker_start_error(exc: BaseException) -> bool:
+    """Return whether Docker startup failed on port allocation or readiness."""
     message = str(exc).lower()
     return any(
         marker in message
@@ -62,13 +62,14 @@ def _is_docker_port_error(exc: BaseException) -> bool:
             "port is already allocated",
             "bind for",
             "address already in use",
+            "container failed to become healthy in time",
         )
     )
 
 
 @contextmanager
 def _docker_workspace_context(**kwargs):
-    """Create a Docker workspace, retrying transient host-port conflicts.
+    """Create a Docker workspace, retrying port conflicts and readiness timeouts.
 
     DockerWorkspace starts its container in the constructor, so the retry must
     surround construction itself. Once construction succeeds, exceptions from
@@ -78,14 +79,17 @@ def _docker_workspace_context(**kwargs):
         try:
             workspace = DockerWorkspace(**kwargs)
         except Exception as exc:
-            if attempt >= _DOCKER_START_MAX_ATTEMPTS or not _is_docker_port_error(exc):
+            if (
+                attempt >= _DOCKER_START_MAX_ATTEMPTS
+                or not _is_retryable_docker_start_error(exc)
+            ):
                 raise
             print(
-                f"Docker workspace startup hit a port conflict; "
+                f"Docker workspace startup failed: {exc}; "
                 f"retrying (next attempt {attempt + 1}/{_DOCKER_START_MAX_ATTEMPTS})..."
             )
-            # Give Docker/OS a brief chance to release a conflicting mapping
-            # before selecting a new port on the next constructor attempt.
+            # Cleanup in DockerWorkspace releases the failed startup's container;
+            # allow Docker/OS to release its port before starting a fresh one.
             time.sleep(0.2 * attempt)
             continue
 

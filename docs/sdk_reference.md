@@ -36,6 +36,9 @@ Use this section when you need to configure model access or reuse the same model
 
 Implementation details: [`sdk_reference_details/01_llm.md`](sdk_reference_details/01_llm.md)
 
+Gemini smoke tests: [`setup_and_run.md`](setup_and_run.md#chạy-thử-gemini-trước-khi-chạy-benchmark)
+covers DSPy completion and OpenHands SDK text/tool round trips.
+
 ---
 
 ## 2. Agent
