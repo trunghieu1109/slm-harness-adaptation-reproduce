@@ -115,8 +115,9 @@ class ProposerMemory:
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self._memory_path), exist_ok=True)
-        with open(self._memory_path, "w", encoding="utf-8") as f:
+        with open(self._memory_path + ".tmp", "w", encoding="utf-8") as f:
             json.dump([r.to_dict() for r in self._records], f, indent=2, default=str)
+        os.replace(self._memory_path + ".tmp", self._memory_path)
 
     # ---- Recording methods ----
 

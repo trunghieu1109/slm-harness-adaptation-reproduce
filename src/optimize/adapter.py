@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from gepa import EvaluationBatch, GEPAAdapter
 from gepa.core.state import GEPAState
+from gepa.utils.stop_condition import NoImprovementStopper
 
 from .cache import EvalCache
 from .common import (
@@ -72,6 +73,26 @@ class CostBudgetStopper:
     def __call__(self, gepa_state: GEPAState) -> bool:
         total = sum(bucket["accumulated_cost"] for bucket in self._cost_tracker.values())
         return total >= self.max_cost
+
+
+class ResumableNoImprovementStopper(NoImprovementStopper):
+    """Keep GEPA's patience rule while replaying an already checked boundary."""
+
+    def __init__(self, max_iterations_without_improvement: int):
+        super().__init__(max_iterations_without_improvement)
+        self._resume_check_pending = False
+
+    def restore(self, best_score: float, iterations_without_improvement: int) -> None:
+        self.best_score = best_score
+        self.iterations_without_improvement = iterations_without_improvement
+        self._resume_check_pending = True
+
+    def __call__(self, gepa_state: GEPAState) -> bool:
+        if self._resume_check_pending:
+            # GEPA saves at loop entry, after this check has already run.
+            self._resume_check_pending = False
+            return self.iterations_without_improvement >= self.max_iterations_without_improvement
+        return super().__call__(gepa_state)
 
 
 def _run_agent_worker(
@@ -239,9 +260,17 @@ class AgentOptimizationAdapter(GEPAAdapter):
 
         self._gepa_iter = 0
         self._phase = "seed"
+        self._evaluation_phase: str | None = None
         self._calls_since_reflection = 0
         self._last_batch: list[dict] = []
         self._last_results: list[dict] = []
+        self._artifact_iteration_floor = 0
+        self._legacy_adapter_state: dict = {}
+        self._resume_cost_tracker: dict | None = None
+        self._resume_seed_evaluation: EvaluationBatch | None = None
+        self._resume_seed_candidate: dict | None = None
+        self._resume_seed_batch: list[dict] | None = None
+        self._patience_stopper: ResumableNoImprovementStopper | None = None
 
         self._cost_tracker: dict[str, dict] = {
             "rollout_seed": empty_cost_bucket(),
@@ -274,10 +303,122 @@ class AgentOptimizationAdapter(GEPAAdapter):
         os.makedirs(run_dir, exist_ok=True)
         self._cache = EvalCache(os.path.join(run_dir, "shared", "eval_cache.json"))
 
+    def get_adapter_state(self) -> dict:
+        """GEPA snapshots this state at optimization iteration boundaries."""
+        return {
+            "gepa_iter": self._gepa_iter,
+            "phase": self._phase,
+            "calls_since_reflection": self._calls_since_reflection,
+            "cost_tracker": copy.deepcopy(self._cost_tracker),
+            "patience": (
+                {
+                    "best_score": self._patience_stopper.best_score,
+                    "iterations_without_improvement": (
+                        self._patience_stopper.iterations_without_improvement
+                    ),
+                }
+                if self._patience_stopper is not None else None
+            ),
+        }
+
+    def set_adapter_state(self, state: dict) -> None:
+        """Restore through GEPA's adapter hook without rebinding cost references."""
+        state = state or self._legacy_adapter_state
+        if not state:
+            return  # A new GEPA run has no adapter snapshot yet.
+        self._gepa_iter = max(state["gepa_iter"], self._artifact_iteration_floor)
+        self._phase = state["phase"]
+        self._calls_since_reflection = state["calls_since_reflection"]
+        # Disk accounting can include completed work after the last GEPA save.
+        costs = self._resume_cost_tracker or state["cost_tracker"]
+        self._cost_tracker.clear()
+        self._cost_tracker.update(copy.deepcopy(costs))
+        if self._patience_stopper is not None and state["patience"] is not None:
+            self._patience_stopper.restore(
+                state["patience"]["best_score"],
+                state["patience"]["iterations_without_improvement"],
+            )
+
+    def prepare_resume(
+        self, seed_candidate: dict, valset: list[dict],
+        patience_stopper: ResumableNoImprovementStopper,
+    ) -> None:
+        """Restore before GEPA's initial seed evaluation, including older runs.
+
+        GEPA replays the interrupted optimization iteration. Its metric counter,
+        candidates and scores remain owned by GEPA; memory and eval cache already
+        load from disk. The next parent evaluation rebuilds transient reflection
+        inputs, so large trajectories do not need to be embedded in the checkpoint.
+        """
+        self._patience_stopper = patience_stopper
+        checkpoint_path = Path(self.run_dir) / "gepa_state.bin"
+        if not checkpoint_path.exists():
+            return
+        checkpoint = GEPAState.load(self.run_dir)
+        if seed_candidate != checkpoint.program_candidates[0]:
+            raise ValueError("Resume seed candidate differs from the saved GEPA run")
+
+        # GEPA evaluates the seed before loading its state. Return the original
+        # cached seed results without running tools or rewriting seed history.
+        seed_results = []
+        for example in valset:
+            result = self._cache.get(seed_candidate["agent_code"], example)
+            if result is None:
+                raise ValueError("Resume requires the saved seed validation results in eval_cache.json")
+            seed_results.append(result)
+        self._resume_seed_candidate = copy.deepcopy(seed_candidate)
+        self._resume_seed_batch = copy.deepcopy(valset)
+        self._resume_seed_evaluation = EvaluationBatch(
+            outputs=copy.deepcopy([r["output"] for r in seed_results]),
+            scores=[r["score"] for r in seed_results],
+            trajectories=None,
+        )
+
+        iteration_numbers = [0]
+        for path in (Path(self.run_dir) / "iterations").glob("iter_*"):
+            suffix = path.name.removeprefix("iter_")
+            if path.is_dir() and suffix.isdigit():
+                iteration_numbers.append(int(suffix))
+        iteration_numbers.extend(record.iteration for record in self.memory.get_all())
+        self._artifact_iteration_floor = max(iteration_numbers)
+
+        cost_path = Path(self._cost_summary_path())
+        if cost_path.exists():
+            summary = json.loads(cost_path.read_text())
+            self._resume_cost_tracker = {key: summary[key] for key in self._cost_tracker}
+        if not checkpoint.adapter_state:
+            if self._resume_cost_tracker is None:
+                raise ValueError("Old checkpoint has no adapter state or cost_summary.json to restore")
+            self._legacy_adapter_state = {
+                "gepa_iter": self._artifact_iteration_floor,
+                "phase": "reflection",
+                "calls_since_reflection": 0,
+                "cost_tracker": self._resume_cost_tracker,
+                "patience": None,
+            }
+            self.logger.log(
+                "[resume] Old checkpoint: recovering artifact counter and costs from disk; "
+                "patience restarts because the old run did not save it."
+            )
+        self.set_adapter_state(checkpoint.adapter_state)
+        self.logger.log(
+            f"[resume] GEPA metric calls={checkpoint.total_num_evals}; "
+            f"artifact iteration floor={self._gepa_iter}"
+        )
+
     def _iter_dir(self) -> str:
         if self._gepa_iter < 0:
             return os.path.join(self.run_dir, "iterations", "seed")
         return os.path.join(self.run_dir, "iterations", f"iter_{self._gepa_iter:02d}")
+
+    def on_evaluation_start(self, event: dict) -> None:
+        """GEPA identifies existing parents and new proposals explicitly."""
+        self._evaluation_phase = (
+            "candidate" if event["candidate_idx"] is None else "reflection"
+        )
+
+    def on_evaluation_end(self, event: dict) -> None:
+        self._evaluation_phase = None
 
     def _phase_dir(self) -> str:
         base = self._iter_dir()
@@ -291,14 +432,16 @@ class AgentOptimizationAdapter(GEPAAdapter):
         return os.path.join(self.run_dir, "shared", "cost_summary.json")
 
     def _save_cost_summary(self) -> None:
-        total = empty_cost_bucket()
-        for bucket in self._cost_tracker.values():
-            add_to_cost_bucket(total, bucket)
+        total = {
+            key: sum(bucket[key] for bucket in self._cost_tracker.values())
+            for key in empty_cost_bucket()
+        }
         summary = {**self._cost_tracker, "total": total}
         path = self._cost_summary_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
+        os.replace(path + ".tmp", path)
         self.logger.log(
             f"[cost] total=${total['accumulated_cost']:.4f} "
             f"(rollout_seed=${self._cost_tracker['rollout_seed']['accumulated_cost']:.4f}, "
@@ -447,17 +590,34 @@ class AgentOptimizationAdapter(GEPAAdapter):
         candidate: dict[str, str],
         capture_traces: bool = False,
     ) -> EvaluationBatch:
-        is_reflection_pass = capture_traces
+        if self._resume_seed_evaluation is not None:
+            if (
+                candidate != self._resume_seed_candidate
+                or batch != self._resume_seed_batch
+                or capture_traces
+            ):
+                raise ValueError("Expected GEPA's initial seed validation call during resume")
+            result = self._resume_seed_evaluation
+            self._resume_seed_evaluation = None
+            self._resume_seed_candidate = None
+            self._resume_seed_batch = None
+            self.logger.log("[resume] Reusing saved seed validation; no new rollout or history entry")
+            return result
 
-        if is_reflection_pass:
+        # capture_traces controls returned evidence, not the evaluation's role:
+        # GEPA's batch fallback also enables it for children and full validation.
+        if self._evaluation_phase == "reflection":
             self._gepa_iter += 1
             self._phase = "reflection"
             self._calls_since_reflection = 0
-        elif self._gepa_iter == 0:
+        elif self._evaluation_phase == "candidate":
+            self._phase = "candidate"
+            self._calls_since_reflection += 1
+        elif not self.memory.get_all():
             self._phase = "seed"
         else:
             self._calls_since_reflection += 1
-            self._phase = "candidate" if self._calls_since_reflection == 1 else "valset"
+            self._phase = "valset"
 
         self._last_batch = batch
         phase_dir = self._phase_dir()
@@ -478,11 +638,11 @@ class AgentOptimizationAdapter(GEPAAdapter):
 
         outputs = []
         scores = []
-        trajectories = [] if is_reflection_pass else None
+        trajectories = [] if capture_traces else None
         for result in results_list:
             outputs.append(result["output"])
             scores.append(result["score"])
-            if is_reflection_pass:
+            if capture_traces:
                 trajectories.append(result["trajectory"])
 
         avg_score = sum(scores) / len(scores) if scores else 0.0
@@ -497,7 +657,7 @@ class AgentOptimizationAdapter(GEPAAdapter):
                 trajectory_dir=str(phase_dir),
             )
             self.memory.write_iteration_overview(self._iter_dir(), 0)
-        elif is_reflection_pass:
+        elif self._phase == "reflection":
             self.memory.record_reflection(
                 self._gepa_iter,
                 candidate["agent_code"],

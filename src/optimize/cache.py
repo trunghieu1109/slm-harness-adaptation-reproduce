@@ -175,5 +175,6 @@ class EvalCache:
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        with open(self._path, "w") as f:
+        with open(self._path + ".tmp", "w") as f:
             json.dump(self._data, f)
+        os.replace(self._path + ".tmp", self._path)

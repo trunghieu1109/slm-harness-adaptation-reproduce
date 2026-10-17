@@ -2,23 +2,28 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
 import yaml
 from gepa import GEPAResult, StopperProtocol, optimize
-from gepa.utils.stop_condition import NoImprovementStopper, ScoreThresholdStopper
+from gepa.core.state import GEPAState
+from gepa.utils.stop_condition import ScoreThresholdStopper
 
 from .dataloader import prepare_task
 from .optimize import (
     AgentOptimizationAdapter,
     CostBudgetStopper,
     GEPAFileLogger,
+    ProposerMemory,
+    ResumableNoImprovementStopper,
     execute_agent_candidate,
     extract_best_val_score_trace,
     extract_workspace_scripts,
     validate_agent_candidate,
 )
 from .task_setups import get_seed_candidate, preprocess_example, setup_servers
+from .optimize.common import hash_text
 
 __all__ = [
     "AgentOptimizationAdapter",
@@ -38,11 +43,11 @@ def _print_effective_config(config: dict) -> None:
     print(yaml.safe_dump(config, sort_keys=False).rstrip())
 
 
-def _find_best_candidate_record(adapter: AgentOptimizationAdapter, best_score: float):
-    records = [record for record in adapter.memory.get_all() if record.val_score is not None]
-    matching = [record for record in records if abs(record.val_score - best_score) <= 1e-9]
+def _find_best_candidate_record(memory: ProposerMemory, agent_code: str):
+    code_hash = hash_text(agent_code)
+    matching = [record for record in memory.get_all() if record.code_hash == code_hash]
     if not matching:
-        raise ValueError(f"Could not find best candidate record for val score {best_score}")
+        raise ValueError(f"Could not find GEPA's selected candidate in memory: {code_hash}")
     matching.sort(key=lambda record: (record.iteration, record.code_hash))
     return matching[0]
 
@@ -186,10 +191,13 @@ def run_optimization(
         teacher_trajectory_dir=teacher_trajectory_dir,
     )
 
+    patience_stopper = ResumableNoImprovementStopper(no_improvement_patience)
+    adapter.prepare_resume(seed_candidate, valset, patience_stopper)
+
     stoppers: list[StopperProtocol] = []
     if max_cost is not None:
         stoppers.append(CostBudgetStopper(max_cost, adapter._cost_tracker))
-    stoppers.append(NoImprovementStopper(no_improvement_patience))
+    stoppers.append(patience_stopper)
     stoppers.append(ScoreThresholdStopper(1.0))
 
     result: GEPAResult = optimize(
@@ -203,8 +211,21 @@ def run_optimization(
         run_dir=run_dir,
         display_progress_bar=True,
         logger=gepa_logger,
+        callbacks=[adapter],
     )
 
+    save_optimization_artifacts(
+        result, run_dir, adapter.memory, adapter._cost_tracker,
+        len(trainset), len(valset), train_ratio,
+    )
+    return result
+
+
+def save_optimization_artifacts(
+    result: GEPAResult, run_dir: str, memory: ProposerMemory,
+    cost_summary: dict, train_examples: int, val_examples: int, train_ratio: float,
+) -> dict:
+    """Export GEPA's selected candidate and authoritative validation scores."""
     best = result.best_candidate
     best_score = result.val_aggregate_scores[result.best_idx]
 
@@ -223,10 +244,10 @@ def run_optimization(
             f.write(f"# val_score: {score}\n")
             f.write(cand["agent_code"])
 
-    cost_summary = adapter._cost_tracker
     total_cost = sum(bucket["accumulated_cost"] for bucket in cost_summary.values())
-    best_record = _find_best_candidate_record(adapter, best_score)
-    best_val_score_trace = extract_best_val_score_trace(gepa_logger.log_path)
+    best_record = _find_best_candidate_record(memory, best["agent_code"])
+    log_path = os.path.join(run_dir, "gepa.log")
+    best_val_score_trace = extract_best_val_score_trace(log_path)
     summary = {
         "best_score": best_score,
         "best_idx": result.best_idx,
@@ -235,11 +256,9 @@ def run_optimization(
         "best_candidate_path": best_config_path,
         "best_train_score": best_record.subsample_avg,
         "best_train_scores": best_record.subsample_scores,
-        "best_val_scores": [
-            feedback["score"] for feedback in best_record.val_per_example_feedback or []
-        ],
-        "train_examples": len(trainset),
-        "val_examples": len(valset),
+        "best_val_scores": list(result.val_subscores[result.best_idx].values()),
+        "train_examples": train_examples,
+        "val_examples": val_examples,
         "train_ratio": train_ratio,
         "num_candidates": result.num_candidates,
         "total_metric_calls": result.total_metric_calls,
@@ -248,21 +267,45 @@ def run_optimization(
         "cost_summary": {**cost_summary, "total_cost": total_cost},
     }
     summary_path = os.path.join(config_dir, "optimization_summary.json")
-    with open(summary_path, "w", encoding="utf-8") as f:
+    with open(summary_path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
+    os.replace(summary_path + ".tmp", summary_path)
 
     print(f"Best score: {best_score}")
     print(f"Best config saved to: {best_config_path}")
     print(f"Summary saved to: {summary_path}")
-    print(f"Log file: {gepa_logger.log_path}")
+    print(f"Log file: {log_path}")
     print(f"Total cost: ${total_cost:.4f}")
 
-    return result
+    return summary
+
+
+def finalize_checkpoint(run_dir: str) -> dict:
+    """Recover export artifacts without proposing or evaluating any candidate."""
+    root = Path(run_dir)
+    config = yaml.safe_load((root / "shared/config/used_config.yaml").read_text())
+    checkpoint = GEPAState.load(run_dir)
+    result = GEPAResult.from_state(checkpoint, run_dir=run_dir, seed=config["seed"])
+    data_path = config["data_path"] or f"data/{config['task_id']}.json"
+    data = json.loads(Path(data_path).read_text())[config["data_start_index"]:]
+    data = data[:config["max_examples"]]
+    split_idx = max(1, int(len(data) * config["train_ratio"]))
+    val_examples = len(data) - split_idx if split_idx < len(data) else len(data)
+    costs = json.loads((root / "shared/cost_summary.json").read_text())
+    return save_optimization_artifacts(
+        result, run_dir, ProposerMemory(run_dir),
+        {key: value for key, value in costs.items() if key != "total"},
+        split_idx, val_examples, config["train_ratio"],
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run agentic GEPA optimization")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
+    parser.add_argument(
+        "--finalize-only", action="store_true",
+        help="Export the saved GEPA checkpoint without running optimization or rollouts.",
+    )
     parser.add_argument("--task_id", type=str, help="Task identifier")
     parser.add_argument("--model_name", type=str, help="Model name for agent execution")
     parser.add_argument("--prompt_name", type=str, default=None, help="Prompt name for seed")
@@ -335,6 +378,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         with open(args.config, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         print(f"Loaded config from {args.config}")
+
+    if args.finalize_only:
+        run_dir = args.run_dir or config["run_dir"]
+        finalize_checkpoint(run_dir)
+        return 0
 
     task_id = args.task_id or config.get("task_id")
     model_name = args.model_name or config.get("model_name")

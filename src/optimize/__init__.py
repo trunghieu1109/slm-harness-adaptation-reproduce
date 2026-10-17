@@ -1,4 +1,4 @@
-from .adapter import AgentOptimizationAdapter, CostBudgetStopper
+from .adapter import AgentOptimizationAdapter, CostBudgetStopper, ResumableNoImprovementStopper
 from .common import (
     execute_agent_candidate,
     extract_workspace_scripts,
@@ -14,6 +14,7 @@ __all__ = [
     "CostBudgetStopper",
     "GEPAFileLogger",
     "ProposerMemory",
+    "ResumableNoImprovementStopper",
     "execute_agent_candidate",
     "extract_best_val_score_trace",
     "extract_workspace_scripts",

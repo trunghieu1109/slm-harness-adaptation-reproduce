@@ -160,3 +160,35 @@ optimization, use the task/model/seed rows listed in
 `replication_package/outputs/data/included_task_model_seed_triplets.csv`, with
 the full training budget used by the paper rather than the small `budget ($)=2`
 smoke-test value above.
+
+### Resume an interrupted GEPA optimization
+
+Run the optimizer with the same config and `run_dir`:
+
+```bash
+uv run python -m src.gepa_optimize --config path/to/the/original_config.yaml
+```
+
+Keep the original seed, models and dataset split. `max_metric_calls` is a total
+budget including evaluations already saved in `gepa_state.bin`; it is not an
+additional allowance. The checkpoint also stores adapter counters and patience.
+Previously saved memory, evaluation cache, token and cost accounting are reused.
+An interrupted iteration can be replayed into new artifact directories, while the
+initial seed validation is read from cache without another rollout.
+
+Checkpoints created before adapter state was saved recover artifact counters and
+accounting from existing files; their patience starts over and this is logged.
+Preserve the entire run directory, including `shared/`. The `launch-optimize`
+batch command resumes incomplete runs, but skips runs with completed optimization
+artifacts; use the direct command above to extend a completed run's budget.
+
+If optimization finished but exporting its summary failed, rebuild the artifacts
+from the checkpoint without advancing optimization or running any model:
+
+```bash
+uv run python -m src.gepa_optimize --config path/to/the/original_config.yaml --finalize-only
+```
+
+The exported candidate and validation scores come from GEPA's result. Proposal
+memory supplies the candidate's history by code identity; missing historical
+training scores remain unknown rather than being fabricated.
