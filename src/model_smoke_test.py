@@ -2,6 +2,8 @@ import argparse
 from collections.abc import Sequence
 from time import perf_counter
 
+from dspy.lm15 import Config, Message, Reasoning, Request
+
 from .utils import LM_DICT, resolve_api_key
 
 
@@ -70,17 +72,32 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"Model ID: {lm.model}")
 
     started = perf_counter()
-    response = lm(
-        messages=[{"role": "user", "content": args.prompt}],
-        max_tokens=args.max_tokens,
-        timeout=args.timeout,
+    # DSPy 3.5 removed the legacy ``lm(messages=[...])`` call.  Use its
+    # normalized lm15 request so the smoke test exercises the same configured
+    # endpoint and reasoning setting as the current runtime.
+    configured_reasoning = lm.kwargs.get("reasoning_effort")
+    # SLM's registry uses LiteLLM's ``none`` spelling; lm15 uses ``off`` for
+    # the same lowest reasoning setting.
+    lm15_reasoning = "off" if configured_reasoning == "none" else configured_reasoning
+    request = Request(
+        model=lm.model,
+        messages=(Message.user(args.prompt),),
+        config=Config(
+            max_tokens=args.max_tokens,
+            temperature=lm.kwargs.get("temperature"),
+            reasoning=Reasoning(effort=lm15_reasoning)
+            if lm15_reasoning
+            else None,
+        ),
     )
+    response = lm(request, cache=False, timeout=args.timeout)
+    response_text = response.text
 
     print(f"Elapsed: {perf_counter() - started:.2f}s")
     print("Response:")
-    print(response[0])
-    print(f"Usage: {lm.history[-1]['usage']}")
-    check_response(response[0], expected_response(args))
+    print(response_text)
+    print(f"Usage: {response.usage}")
+    check_response(response_text, expected_response(args))
     print("PASS: DSPy completion")
 
 

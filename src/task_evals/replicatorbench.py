@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import dspy
 
+from ..utils import lm_text_completion
+
 from ..utils import batch_inference
 
 
@@ -300,8 +302,7 @@ def _normalize_lm_json(text: str) -> str:
 def _call_lm_judge(lm: dspy.LM, prompt: str, retries: int = 2) -> Tuple[Optional[dict], Optional[str]]:
     last_err = "no attempts made"
     for attempt in range(retries):
-        response = lm(messages=[{"role": "user", "content": prompt}])
-        text = response[0] if isinstance(response, list) else str(response)
+        text = lm_text_completion(lm, [{"role": "user", "content": prompt}])
         text = _strip_fences(text)
         text = _normalize_lm_json(text)
         # First try parsing the whole response

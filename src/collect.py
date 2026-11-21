@@ -12,7 +12,7 @@ from functools import partial
 from copy import deepcopy
 from typing import List, Any, Optional
 
-from .utils import batch_inference
+from .utils import batch_inference, lm_text_completion
 from .dataloader import CollectDataLoader
 
 import os
@@ -68,8 +68,7 @@ def run_single_instance(
     validation_errors = []
 
     for _ in range(max_retries):
-        response = lm(messages=messages, rollout_id=seed)
-        output = response[0]
+        output = lm_text_completion(lm, messages, rollout_id=seed)
 
         # Validate output if validation function is provided
         if validation_fn is not None:

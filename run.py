@@ -1482,8 +1482,14 @@ def build_post_gepa_json_row(summary: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_post_gepa_table_row(summary: dict[str, Any]) -> dict[str, str]:
-    train_rollout_scores = summary["rerun_train_scores_by_rollout"]
-    val_rollout_scores = summary["rerun_val_scores_by_rollout"]
+    # Keep the fixed table schema while allowing experiments to use fewer than
+    # three responses (for example, the configured n_responses=2).  Missing
+    # rollout columns are left blank instead of aborting summary
+    # generation after all evaluations have completed.
+    train_rollout_scores = list(summary["rerun_train_scores_by_rollout"])
+    val_rollout_scores = list(summary["rerun_val_scores_by_rollout"])
+    train_rollout_scores.extend([None] * (3 - len(train_rollout_scores)))
+    val_rollout_scores.extend([None] * (3 - len(val_rollout_scores)))
     return {
         "Task": summary["task_id"],
         "Run": summary["run_dir"],

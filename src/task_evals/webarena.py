@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 
 import dspy
 
+from ..utils import lm_text_completion
+
 
 class WebarenaFeedbackSignature(dspy.Signature):
     """Generate brief feedback for a webarena task evaluation result."""
@@ -159,8 +161,8 @@ def _llm_fuzzy_match(lm: dspy.LM, pred: str, ref: str, intent: str) -> float:
         f"Does the model response match the reference answer? "
         f"Respond with 'yes' or 'no' only."
     )
-    response = lm(messages=[{"role": "user", "content": prompt}])
-    return float(response[0].strip().lower().startswith("yes"))
+    response = lm_text_completion(lm, [{"role": "user", "content": prompt}])
+    return float(response.strip().lower().startswith("yes"))
 
 
 def _llm_ua_match(lm: dspy.LM, pred: str, ref: str, intent: str) -> float:
@@ -174,8 +176,8 @@ def _llm_ua_match(lm: dspy.LM, pred: str, ref: str, intent: str) -> float:
         f"Did the model correctly identify that the task is unachievable and provide "
         f"an appropriate reason? Respond with 'yes' or 'no' only."
     )
-    response = lm(messages=[{"role": "user", "content": prompt}])
-    return float(response[0].strip().lower().startswith("yes"))
+    response = lm_text_completion(lm, [{"role": "user", "content": prompt}])
+    return float(response.strip().lower().startswith("yes"))
 
 
 def _string_match_score(

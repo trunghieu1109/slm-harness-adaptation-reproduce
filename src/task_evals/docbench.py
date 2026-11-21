@@ -11,6 +11,8 @@ from typing import Any, Dict, Optional
 
 import dspy
 
+from ..utils import lm_text_completion
+
 
 EVALUATION_PROMPT = """\
 Task Overview:
@@ -138,9 +140,7 @@ def run_single_instance_eval(
         ref_text=evidence,
     )
 
-    response = lm(messages=[{"role": "user", "content": prompt}])
-    # dspy LM returns a list of completion strings
-    response_text = response[0] if isinstance(response, list) else str(response)
+    response_text = lm_text_completion(lm, [{"role": "user", "content": prompt}])
 
     correctness = _parse_correctness(response_text)
     score = float(correctness)

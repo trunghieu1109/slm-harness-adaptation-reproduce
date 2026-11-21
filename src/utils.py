@@ -11,6 +11,7 @@ import tqdm
 from dotenv import load_dotenv
 import yaml
 from openhands.sdk import LLM
+from dspy.lm15 import Config, Message, Reasoning, Request
 
 DEFAULT_VERTEX_CREDENTIALS_PATH = Path(".vertex-ai.json").resolve()
 
@@ -134,6 +135,63 @@ def resolve_api_key(lm: dspy.LM) -> str | None:
     if api_key == "gcloud":
         return subprocess.check_output(["gcloud", "auth", "print-access-token"]).decode().strip()
     return api_key
+
+
+def lm_text_completion(
+    lm: dspy.LM,
+    messages: list[dict],
+    *,
+    timeout: int | float | None = None,
+    rollout_id=None,
+) -> str:
+    """Call a DSPy LM through the DSPy 3.5 lm15 request API.
+
+    DSPy 3.5 removed the legacy ``lm(messages=[...])`` form.  Keeping this
+    adapter in one place prevents task evaluators and non-agentic fallbacks
+    from silently using the removed API while preserving model registry
+    temperature, token and reasoning settings.
+    """
+    system_parts = []
+    converted = []
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+        if not isinstance(content, str):
+            if isinstance(content, list):
+                content = "".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in content
+                )
+            else:
+                content = str(content)
+        if role == "system":
+            system_parts.append(content)
+        elif role == "assistant":
+            converted.append(Message.assistant(content))
+        elif role == "developer":
+            converted.append(Message.developer(content))
+        else:
+            converted.append(Message.user(content))
+
+    configured_reasoning = lm.kwargs.get("reasoning_effort")
+    lm15_reasoning = "off" if configured_reasoning == "none" else configured_reasoning
+    config = Config(
+        max_tokens=lm.kwargs.get("max_tokens") or lm.kwargs.get("max_output_tokens"),
+        temperature=lm.kwargs.get("temperature"),
+        reasoning=Reasoning(effort=lm15_reasoning) if lm15_reasoning else None,
+    )
+    request = Request(
+        model=lm.model,
+        messages=tuple(converted) or (Message.user(""),),
+        system="\n\n".join(system_parts) or None,
+        config=config,
+    )
+    options = {"cache": False}
+    if timeout is not None:
+        options["timeout"] = timeout
+    if rollout_id is not None:
+        options["rollout_id"] = rollout_id
+    return lm(request, **options).text
 
 
 def build_sdk_llm(lm: dspy.LM) -> LLM:

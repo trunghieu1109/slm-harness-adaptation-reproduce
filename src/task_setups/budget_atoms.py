@@ -27,6 +27,8 @@ from typing import Any, Callable, Optional
 
 import dspy
 
+from ..utils import lm_text_completion
+
 
 # ---------------------------------------------------------------------------
 # Documents
@@ -577,8 +579,8 @@ def _llm_status_match(lm: dspy.LM, message: str, expected_status: str) -> bool:
         "'over budget' are equivalent to 'exceed budget', while 'within budget' is "
         "equivalent to 'under budget'. Respond with 'yes' or 'no' only."
     )
-    response = lm(messages=[{"role": "user", "content": prompt}])
-    return response[0].strip().lower().startswith("yes")
+    response = lm_text_completion(lm, [{"role": "user", "content": prompt}])
+    return response.strip().lower().startswith("yes")
 
 
 def _status_in(message: str, expected_status: str, lm: Optional[dspy.LM]) -> bool:

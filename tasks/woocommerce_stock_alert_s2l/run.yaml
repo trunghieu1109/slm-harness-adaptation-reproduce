@@ -1,11 +1,11 @@
 task_id: "woocommerce_stock_alert_s2l"
 data_path: "data/woocommerce_stock_alert_s2l.json"
-model_name: "qwen3.5-9b"
+model_name: "qwen-vllm"
 prompt_name: "default"
 
 max_examples: 30
-n_responses: 3
-agent_batch_size: 8
+n_responses: 2
+agent_batch_size: 5
 eval_batch_size: 16
 resume: true
 

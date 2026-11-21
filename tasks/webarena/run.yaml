@@ -1,11 +1,11 @@
 task_id: "webarena"
 data_path: "data/webarena_shopping_admin_easy.json"
-model_name: "qwen3.5-9b"
+model_name: "qwen-vllm"
 prompt_name: "shopping_admin"
 
 max_examples: 30
-n_responses: 3
-agent_batch_size: 4
+n_responses: 2
+agent_batch_size: 5
 resume: true
 
 is_agentic: true
@@ -25,7 +25,7 @@ rollout_version: baseline
 start_servers: false
 server_start_timeout: 300  # seconds per container; increase if containers are slow to start
 
-eval_lm: "qwen3.6-35b-a3b-fp8"
+eval_lm: "gpt-proposer"
 
 
 # agent_file: scripts/agents/webarena_agent.py

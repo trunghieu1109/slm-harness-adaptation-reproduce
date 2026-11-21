@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 
 import dspy
 
+from ..utils import lm_text_completion
+
 
 EVALUATION_PROMPT = """\
 Judge whether the following [response] to [question] is correct or not \
@@ -82,8 +84,7 @@ def run_single_instance_eval(
         correct_answer=reference_answer,
     )
 
-    response = lm(messages=[{"role": "user", "content": prompt}])
-    response_text = response[0] if isinstance(response, list) else str(response)
+    response_text = lm_text_completion(lm, [{"role": "user", "content": prompt}])
 
     score = float(_parse_score(response_text))
 

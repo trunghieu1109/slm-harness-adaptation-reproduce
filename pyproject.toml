@@ -39,6 +39,7 @@ dependencies = [
     "typer>=0.25.1",
     "tabulate>=0.10.0",
     "lmnr>=0.7.47,<0.7.53",
+    "agent-client-protocol==0.8.1",
 ]
 
 [tool.uv.sources]
