@@ -33,6 +33,7 @@ generated*
 docs/dep/
 scripts/*
 !scripts/cleanup_codex_plugin_caches.py
+!scripts/setup.sh
 figures/
 plots/
 .roar/

@@ -91,14 +91,26 @@ Project yêu cầu Python 3.14. `uv` có thể tự quản lý phiên bản Pyth
 
 ```bash
 export UV_CACHE_DIR="$PWD/.uv-cache"
-uv sync
+bash scripts/setup.sh
 ```
+
+Script khởi tạo submodule nếu cần, áp
+`patches/software-agent-sdk-docker-startup.patch` vào `software-agent-sdk`, rồi
+chạy `uv sync`. Patch chứa sửa lỗi cleanup container khi khởi động thất bại,
+thông tin lỗi health check, và các test tương ứng. Không cần fork hay push
+commit riêng vào repository SDK; giữ nguyên commit submodule đã pin.
+
+Chạy lại script sẽ bỏ qua patch đã áp. Nếu source SDK không tương thích với
+patch, script dừng và báo lỗi trước khi cài dependency; không tự reset các sửa
+đổi local. Sau setup, `git status` có thể báo submodule `software-agent-sdk`
+modified do patch. Đây là trạng thái dự kiến: chỉ commit file patch và script
+trong repo cha. Docker build copy source SDK đã áp patch từ checkout này.
 
 Lệnh này cũng tạo `uv.lock`. Dockerfile của các task cần file lock này khi
 build image. Ở các lần setup sau, có thể dùng:
 
 ```bash
-uv sync --frozen
+bash scripts/setup.sh --frozen
 ```
 
 ## 4. Cấu hình model
@@ -512,9 +524,7 @@ container_uid=1000
 git --version
 uv --version
 docker info
-git submodule sync --recursive
-git submodule update --init --recursive
-uv sync
+bash scripts/setup.sh
 mkdir -p configs
 ```
 
@@ -581,7 +591,7 @@ if [ "$container_uid" -eq 0 ]; then container_uid=1000; fi
 Sau đó chạy chung trên cả hai shell:
 
 ```bash
-uv sync
+bash scripts/setup.sh
 
 uv run python - <<'PY'
 from src.utils import LM_DICT

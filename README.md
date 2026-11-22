@@ -93,6 +93,19 @@ does not include raw trace files, so the diversity figure uses the included
 
 ## Run One Experiment From Raw Data
 
+Install the benchmark dependencies from the repository root:
+
+```bash
+bash scripts/setup.sh
+```
+
+This initializes the submodules, applies the committed SDK Docker startup patch,
+and runs `uv sync`. It is safe to rerun; use `bash scripts/setup.sh --frozen`
+to reuse an existing lockfile. The SDK fixes are stored in
+`patches/software-agent-sdk-docker-startup.patch`, so no SDK fork or submodule
+commit is needed. See [Setup and run benchmarks](docs/setup_and_run.md) for
+model configuration and Docker setup.
+
 The committed root `data/*.json` files are the task datasets. The experiment
 runner reads the task's `tasks/<task_id>/run*.yaml` config, which points to the
 corresponding raw data file through `data_path`.

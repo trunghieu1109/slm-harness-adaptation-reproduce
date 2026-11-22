@@ -21,7 +21,7 @@ fi
 printf 'task=%s\nrollout=%s\nbatch=%s\n' \
   "$task_id" "$rollout_version" "$batch_dir"
 
-uv sync --frozen
+bash scripts/setup.sh --frozen
 
 test -e .vertex-ai.json || printf '%s\n' '{}' > .vertex-ai.json
 
